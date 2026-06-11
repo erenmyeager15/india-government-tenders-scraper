@@ -1,6 +1,6 @@
 # India Government Tenders Scraper - GeM & CPPP Portal
 
-Scrape Indian government tender leads for B2B sales, procurement research, and public-sector opportunity tracking. The actor searches the live GeM bid listing endpoint by keyword, deduplicates tenders by ID, then enriches each GeM result from its public bid PDF when available. PDF enrichment fills practical lead fields such as publishing date, bid opening date, bid validity, organization, ministry, department, state/location hints, EMD amount, and eligibility summary.
+Scrape Indian government tender leads for B2B sales, procurement research, and public-sector opportunity tracking. The actor searches the live GeM bid listing endpoint by keyword, deduplicates tenders by ID, then enriches each GeM result from its public bid PDF when available. PDF enrichment fills practical lead fields such as publishing date, bid opening date, bid validity, organization, ministry, department, state/location hints, EMD amount, and eligibility summary. Export to JSON, CSV, Excel, or HTML, or pull via the Apify API — no login and no API key required.
 
 The actor accepts multiple keywords in one run, supports up to 500 matching tenders per keyword, and saves clean records to the Apify Dataset. Filters are applied after enrichment where the public source exposes the field, so state and published-date filters use the recovered GeM detail data instead of rough listing text. Pay-per-event charging happens only after a real tender record is pushed to the dataset.
 
@@ -13,6 +13,14 @@ CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before
 3. Vendor opportunity tracking for active GeM bid deadlines
 4. Government contract analytics by ministry and department
 5. Supply chain planning around public-sector demand signals
+
+## How to Scrape India Government Tenders (Step by Step)
+
+1. Click **Try for free** / **Run**.
+2. Keep `source` as `gem` (CPPP is CAPTCHA-gated and skipped) and enter your search `keywords` (e.g. `laptop`).
+3. Set `maxResults` per keyword (start small to test).
+4. Optionally filter by `state`, `department`, `status`, value range, or date range, then click **Run**.
+5. When the run finishes, export results to JSON, CSV, Excel, or HTML, or pull them via the Apify API.
 
 ## Input
 
