@@ -24,7 +24,6 @@
                             "ministry",
                             "category",
                             "tenderType",
-                            "tenderValue",
                             "bidSubmissionStartDate",
                             "bidSubmissionEndDate",
                             "tenderOpenDate",
@@ -36,9 +35,7 @@
                             "location",
                             "eligibilityCriteriaSummary",
                             "emdAmount",
-                            "tenderDocumentFee",
                             "tenderUrl",
-                            "corrigendumCount",
                             "scrapedAt"
                         ]
                     },

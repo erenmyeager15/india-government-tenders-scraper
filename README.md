@@ -112,6 +112,7 @@ The CPPP object above shows the intended schema. Current CPPP public pages are C
 ## Notes
 
 - GeM tender value, tender document fee, and corrigendum count are left `null` when they are not exposed by the public listing or bid PDF.
+- The default Apify table view focuses on populated GeM lead fields and hides GeM-only unavailable value, fee, and corrigendum columns.
 - GeM state/location is inferred from public bid PDF text when available. Records without a matched state are excluded only when a state filter is provided.
 - No placeholder rows are pushed.
 - No PPE event is charged unless `Actor.pushData()` succeeds for a real tender record.
