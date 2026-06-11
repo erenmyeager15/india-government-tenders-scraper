@@ -73,7 +73,9 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
             groups: input.proxyConfiguration?.apifyProxyGroups ?? ['RESIDENTIAL'],
         });
 
-    const session = await createGemSession(proxyConfiguration ? await proxyConfiguration.newUrl() : undefined);
+    const proxyUrl = proxyConfiguration ? await proxyConfiguration.newUrl() : undefined;
+    log.info(`GeM network mode: ${proxyUrl ? 'Apify Proxy enabled' : 'direct connection'}`);
+    const session = await createGemSession(proxyUrl);
     const records: TenderRecord[] = [];
 
     for (const keyword of input.keywords) {
@@ -252,7 +254,7 @@ async function fetchWithRetries(url: string, init: FetchInitWithDispatcher = {})
         try {
             const controller = new AbortController();
             const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
-            const response = await fetch(url, { ...init, signal: controller.signal } as RequestInit);
+            const response = await fetch(url, { ...init, signal: controller.signal } as RequestInit & { dispatcher?: ProxyAgent });
             clearTimeout(timeout);
             if ([403, 429, 500, 502, 503, 504].includes(response.status)) {
                 throw new Error(`HTTP ${response.status} from ${url}`);
@@ -260,6 +262,7 @@ async function fetchWithRetries(url: string, init: FetchInitWithDispatcher = {})
             return response;
         } catch (error) {
             lastError = error;
+            log.warning(`Fetch attempt ${attempt}/${MAX_RETRIES} failed for ${url}: ${errorMessage(error)}`);
             if (attempt < MAX_RETRIES) await randomDelay(1000, 3000);
         }
     }
@@ -380,6 +383,14 @@ function deduplicate(records: TenderRecord[]): TenderRecord[] {
         seen.add(key);
         return true;
     });
+}
+
+function errorMessage(error: unknown): string {
+    if (!(error instanceof Error)) return String(error);
+    const cause = (error as Error & { cause?: unknown }).cause;
+    if (cause instanceof Error) return `${error.message}; cause=${cause.message}`;
+    if (cause) return `${error.message}; cause=${String(cause)}`;
+    return error.message;
 }
 
 type FetchInitWithDispatcher = RequestInit & {

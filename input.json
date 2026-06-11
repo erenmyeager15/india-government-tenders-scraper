@@ -4,6 +4,7 @@
     "state": "Maharashtra",
     "maxResults": 10,
     "proxyConfiguration": {
-        "useApifyProxy": false
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
     }
 }
