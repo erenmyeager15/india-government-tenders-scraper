@@ -1,0 +1,7 @@
+{
+  "source": "gem",
+  "keywords": ["laptop"],
+  "status": "active",
+  "maxResults": 5,
+  "proxyConfiguration": { "useApifyProxy": true, "apifyProxyGroups": ["RESIDENTIAL"] }
+}

@@ -13,7 +13,7 @@ const GEM_BASE_URL = 'https://bidplus.gem.gov.in';
 const CPPP_ACTIVE_URL = 'https://eprocure.gov.in/eprocure/app?page=FrontEndLatestActiveTenders&service=page';
 const USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
-const REQUEST_TIMEOUT_MS = 25000;
+const REQUEST_TIMEOUT_MS = 60000;
 const MAX_RETRIES = 3;
 
 interface GemSession {
@@ -76,6 +76,7 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
         ? undefined
         : await Actor.createProxyConfiguration({
             groups: input.proxyConfiguration?.apifyProxyGroups ?? ['RESIDENTIAL'],
+            countryCode: input.proxyConfiguration?.apifyProxyCountry ?? 'IN',
         });
 
     const proxyUrl = proxyConfiguration ? await proxyConfiguration.newUrl() : undefined;

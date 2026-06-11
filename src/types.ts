@@ -15,6 +15,7 @@ export interface ActorInput {
     proxyConfiguration?: {
         useApifyProxy?: boolean;
         apifyProxyGroups?: string[];
+        apifyProxyCountry?: string;
     };
 }
 
