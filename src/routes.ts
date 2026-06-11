@@ -1,8 +1,13 @@
 import { Actor, log } from 'apify';
+import { createRequire } from 'node:module';
+import type pdfParseType from 'pdf-parse';
 import { ProxyAgent } from 'undici';
 import { ActorInput, NormalizedInput, TenderRecord, TenderStatus } from './types.js';
 
 type JsonObject = Record<string, unknown>;
+
+const require = createRequire(import.meta.url);
+const pdfParse = require('pdf-parse/lib/pdf-parse.js') as typeof pdfParseType;
 
 const GEM_BASE_URL = 'https://bidplus.gem.gov.in';
 const CPPP_ACTIVE_URL = 'https://eprocure.gov.in/eprocure/app?page=FrontEndLatestActiveTenders&service=page';
@@ -84,7 +89,7 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
 
         while (scrapedForKeyword < input.maxResults) {
             await randomDelay();
-            const data = await fetchGemPage(session, input, keyword, page);
+            const data = await fetchGemPage(session, input.status, keyword, page);
             const docs = data.response?.response?.docs ?? [];
             const total = data.response?.response?.numFound ?? docs.length;
 
@@ -93,7 +98,7 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
 
             for (const doc of docs) {
                 if (scrapedForKeyword >= input.maxResults) break;
-                const record = mapGemDoc(doc, keyword);
+                const record = await enrichGemRecord(mapGemDoc(doc, keyword), session);
                 if (!passesClientFilters(record, input)) continue;
                 records.push(record);
                 scrapedForKeyword += 1;
@@ -106,6 +111,29 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
     }
 
     return records;
+}
+
+async function enrichGemRecord(record: TenderRecord, session: GemSession): Promise<TenderRecord> {
+    if (!record.tenderUrl) return record;
+
+    try {
+        await randomDelay(600, 1600);
+        const response = await fetchWithRetries(record.tenderUrl, {
+            headers: {
+                ...baseGemHeaders(),
+                accept: 'application/pdf,*/*;q=0.8',
+                referer: `${GEM_BASE_URL}/all-bids`,
+                ...(session.cookie ? { cookie: session.cookie } : {}),
+            },
+            dispatcher: session.dispatcher,
+        });
+        const bytes = Buffer.from(await response.arrayBuffer());
+        const result = await pdfParse(bytes);
+        return mergeGemPdfDetails(record, result.text);
+    } catch (error) {
+        log.warning(`Could not enrich GeM PDF for ${record.tenderId}: ${errorMessage(error)}`);
+        return record;
+    }
 }
 
 async function createGemSession(proxyUrl: string | undefined): Promise<GemSession> {
@@ -127,14 +155,14 @@ async function createGemSession(proxyUrl: string | undefined): Promise<GemSessio
     };
 }
 
-async function fetchGemPage(session: GemSession, input: NormalizedInput, keyword: string, page: number): Promise<GemSearchResponse> {
+async function fetchGemPage(session: GemSession, status: TenderStatus, keyword: string, page: number): Promise<GemSearchResponse> {
     const payload = {
         page,
         param: {
             searchBid: keyword,
             searchType: 'fullText',
         },
-        filter: buildGemFilter(input.status, input.dateFrom, input.dateTo),
+        filter: buildGemFilter(status),
     };
 
     const body = new URLSearchParams({
@@ -169,14 +197,14 @@ async function fetchGemPage(session: GemSession, input: NormalizedInput, keyword
     return data;
 }
 
-function buildGemFilter(status: TenderStatus, dateFrom: string | null, dateTo: string | null): JsonObject {
+function buildGemFilter(status: TenderStatus): JsonObject {
     const filter: JsonObject = {
         bidStatusType: status === 'closed' ? 'bidrastatus' : 'ongoing_bids',
         byType: 'all',
         highBidValue: '',
         byEndDate: {
-            from: dateFrom ? toGemDate(dateFrom) : '',
-            to: dateTo ? toGemDate(dateTo) : '',
+            from: '',
+            to: '',
         },
         sort: status === 'closed' ? 'Bid-End-Date-Latest' : 'Bid-End-Date-Oldest',
     };
@@ -224,6 +252,47 @@ function mapGemDoc(doc: JsonObject, keyword: string): TenderRecord {
         tenderUrl: bidId ? `${GEM_BASE_URL}/showbidDocument/${bidId}` : `${GEM_BASE_URL}/all-bids`,
         corrigendumCount: null,
         scrapedAt: new Date().toISOString(),
+    };
+}
+
+function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
+    const normalizedText = normalizePdfText(text);
+    const openingDate = parseGemDateTime(extractByRegex(normalizedText, /Bid Opening\s+Date\/Time\s+([0-9-]{10}\s+[0-9:]{5,8})/i));
+    const publishedDate = parseGemDateTime(extractByRegex(normalizedText, /Dated:\s*([0-9-]{10})/i));
+    const bidValidity = extractByRegex(normalizedText, /Bid Offer\s+Validity \(From End Date\)\s+([0-9]+\s*\(Days\))/i);
+    const ministryOrState = extractPdfValue(normalizedText, 'Ministry/State Name', ['Department Name'], 1);
+    const department = extractPdfValue(normalizedText, 'Department Name', ['Organisation Name'], 1);
+    const organization = extractPdfValue(normalizedText, 'Organisation Name', ['Office Name'], 1);
+    const pdfCategory = cleanGemCategory(
+        extractPdfValue(normalizedText, 'Item Category', [
+            'Contract Period',
+            'Minimum Average Annual Turnover',
+            'Years of Past Experience',
+            'MSE Relaxation',
+            'Startup Relaxation',
+            'Document required',
+        ], 2),
+    );
+    const category = record.category ?? pdfCategory;
+    const emdAmount = parseAmount(extractByRegex(normalizedText, /EMD Amount\s*([0-9,]+(?:\.\d+)?)/i));
+    const eligibilityCriteriaSummary = buildEligibilitySummary(normalizedText);
+    const state = inferIndianState(normalizedText);
+
+    return {
+        ...record,
+        organization: organization ?? record.organization,
+        department: department ?? record.department,
+        ministry: ministryOrState && !isIndianState(ministryOrState) ? ministryOrState : record.ministry,
+        category,
+        tenderTitle: record.tenderTitle ?? category,
+        bidSubmissionEndDate: record.bidSubmissionEndDate ?? parseGemDateTime(extractByRegex(normalizedText, /Bid End Date\/Time\s+([0-9-]{10}\s+[0-9:]{5,8})/i)),
+        tenderOpenDate: openingDate ?? record.tenderOpenDate,
+        publishedDate: publishedDate ?? record.publishedDate,
+        bidValidity: bidValidity ?? record.bidValidity,
+        state: state ?? (ministryOrState && isIndianState(ministryOrState) ? titleCase(ministryOrState) : record.state),
+        location: state ?? record.location,
+        eligibilityCriteriaSummary: eligibilityCriteriaSummary ?? record.eligibilityCriteriaSummary,
+        emdAmount: emdAmount ?? record.emdAmount,
     };
 }
 
@@ -293,9 +362,10 @@ function passesClientFilters(record: TenderRecord, input: NormalizedInput): bool
         if (!haystack.includes(input.department.toLowerCase())) return false;
     }
 
-    if (input.state && record.state && !record.state.toLowerCase().includes(input.state.toLowerCase())) return false;
-    if (input.minValue !== null && record.tenderValue !== null && record.tenderValue < input.minValue) return false;
-    if (input.maxValue !== null && record.tenderValue !== null && record.tenderValue > input.maxValue) return false;
+    if (input.state && (!record.state || !record.state.toLowerCase().includes(input.state.toLowerCase()))) return false;
+    if (input.minValue !== null && (record.tenderValue === null || record.tenderValue < input.minValue)) return false;
+    if (input.maxValue !== null && (record.tenderValue === null || record.tenderValue > input.maxValue)) return false;
+    if ((input.dateFrom || input.dateTo) && !isDateInRange(record.publishedDate, input.dateFrom, input.dateTo)) return false;
 
     return true;
 }
@@ -304,7 +374,7 @@ function firstString(object: JsonObject, keys: string[]): string | null {
     for (const key of keys) {
         const value = unwrapSolrValue(object[key]);
         if (value === null || value === undefined) continue;
-        const stringValue = String(value).trim();
+        const stringValue = String(value).replace(/\s+/g, ' ').trim();
         if (stringValue) return stringValue;
     }
     return null;
@@ -314,8 +384,8 @@ function firstNumber(object: JsonObject, keys: string[]): number | null {
     for (const key of keys) {
         const value = unwrapSolrValue(object[key]);
         if (value === null || value === undefined) continue;
-        const cleaned = String(value).replace(/[₹,\s]/g, '').replace(/^\+/, '');
-        const parsed = Number.parseFloat(cleaned);
+        const cleaned = String(value).replace(/[^\d.+-]/g, '').replace(/^\+/, '');
+        const parsed = Number.parseFloat(cleaned.replace(/[^\d.+-]/g, ''));
         if (Number.isFinite(parsed)) return parsed;
     }
     return null;
@@ -348,13 +418,158 @@ function gemStatus(buyerStatus: number | null, rawStatus: number | null): string
     return rawStatus === null ? null : `status_${rawStatus}`;
 }
 
-function toGemDate(value: string): string {
-    const date = new Date(value);
-    if (Number.isNaN(date.getTime())) return value;
-    const day = String(date.getUTCDate()).padStart(2, '0');
-    const month = String(date.getUTCMonth() + 1).padStart(2, '0');
-    const year = date.getUTCFullYear();
-    return `${day}-${month}-${year}`;
+function normalizePdfText(text: string): string {
+    return text
+        .replace(/\u0001/g, ' ')
+        .replace(/[ \t]+/g, ' ')
+        .replace(/\r/g, '\n')
+        .replace(/\n[ \t]+/g, '\n')
+        .replace(/[ \t]+\n/g, '\n')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim();
+}
+
+function extractByRegex(text: string, regex: RegExp): string | null {
+    const match = text.match(regex);
+    return cleanString(match?.[1]?.replace(/\s+/g, ' '));
+}
+
+function parseGemDateTime(value: string | null): string | null {
+    if (!value) return null;
+    const match = value.match(/(\d{2})-(\d{2})-(\d{4})(?:\s+(\d{2}):(\d{2})(?::(\d{2}))?)?/);
+    if (!match) return null;
+    const [, day, month, year, hour = '00', minute = '00', second = '00'] = match;
+    const date = new Date(Date.UTC(Number(year), Number(month) - 1, Number(day), Number(hour), Number(minute), Number(second)));
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+}
+
+function parseAmount(value: string | null): number | null {
+    if (!value) return null;
+    const parsed = Number.parseFloat(value.replace(/[^\d.+-]/g, ''));
+    return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildEligibilitySummary(text: string): string | null {
+    const turnover = extractEligibilityValue(
+        extractByRegex(
+            text,
+            /Minimum Average Annual Turnover(?:\s+of\s+the\s+bidder)?(?:\s+\(For\s+3\s+Years\))?\s+([0-9][0-9,.\s]*(?:Lakh|Lakhs|Crore|Crores|Thousand|Hundred|Million|Billion|INR|Rs\.?)?(?:\s*\([^)]+\))?)/i,
+        ),
+    );
+    const experience = extractEligibilityValue(
+        extractByRegex(
+            text,
+            /Years of Past Experience Required(?:\s+for\s+same\/similar\s+service)?\s+([0-9][0-9,.\s]*(?:Year|Years|Month|Months|Day|Days)?(?:\s*\([^)]+\))?)/i,
+        ),
+    );
+    const mseRelaxation = extractEligibilityValue(
+        extractByRegex(text, /MSE Relaxation for Years Of\s+Experience(?:\s+and\s+Turnover)?\s+(Yes\s*\|\s*Complete|No\s*\|\s*Complete|Yes|No)/i),
+    );
+    const startupRelaxation = extractEligibilityValue(
+        extractByRegex(
+            text,
+            /Startup Relaxation for Years Of\s+Experience(?:\s+and\s+Turnover)?\s+(Yes\s*\|\s*Complete|No\s*\|\s*Complete|Yes|No)/i,
+        ),
+    );
+    const documents = extractPdfValue(text, 'Document required', ['*In case', 'Bid Number'], 3, ['from seller']);
+    const parts = [
+        turnover ? `Minimum average annual turnover: ${turnover}` : null,
+        experience ? `Past experience required: ${experience}` : null,
+        mseRelaxation ? `MSE relaxation: ${mseRelaxation}` : null,
+        startupRelaxation ? `Startup relaxation: ${startupRelaxation}` : null,
+        documents ? `Documents required: ${documents}` : null,
+    ].filter((part): part is string => Boolean(part));
+
+    return parts.length > 0 ? parts.join('; ') : null;
+}
+
+function extractEligibilityValue(value: string | null): string | null {
+    if (!value) return null;
+    const cleaned = toReadableEnglish(value)
+        .replace(/\s+\|\s+/g, ' | ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return /[A-Za-z0-9]/.test(cleaned) ? cleaned : null;
+}
+
+function cleanGemCategory(value: string | null): string | null {
+    if (!value) return null;
+    const cleaned = toReadableEnglish(value)
+        .replace(/\s+\/?\s*(?:Minimum Average Annual Turnover|Years of Past Experience Required|MSE Relaxation|Startup Relaxation|Document required)\b.*$/i, '')
+        .replace(/\s+[*%.&](?:\s+[*%.&/\d])+.*$/u, '')
+        .replace(/\s+[\d*.%&/]+\s*$/u, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    return cleanString(cleaned);
+}
+
+function extractPdfValue(
+    text: string,
+    label: string,
+    stopLabels: string[],
+    maxLines: number,
+    skipFragments: string[] = [],
+): string | null {
+    const lines = text.split('\n').map((line) => line.trim()).filter(Boolean);
+    const labelLower = label.toLowerCase();
+    const stopLower = stopLabels.map((item) => item.toLowerCase());
+    const skipLower = skipFragments.map((item) => item.toLowerCase());
+
+    for (let index = 0; index < lines.length; index += 1) {
+        const line = toReadableEnglish(lines[index]);
+        const labelIndex = line.toLowerCase().indexOf(labelLower);
+        if (labelIndex === -1) continue;
+
+        const values: string[] = [];
+        const trailing = line.slice(labelIndex + label.length).trim();
+        if (trailing && !shouldSkipPdfValue(trailing, stopLower, skipLower)) values.push(trailing);
+
+        for (let next = index + 1; next < lines.length && values.length < maxLines; next += 1) {
+            const value = toReadableEnglish(lines[next]);
+            if (!value) continue;
+            if (stopLower.some((stop) => value.toLowerCase().includes(stop))) break;
+            if (shouldSkipPdfValue(value, stopLower, skipLower)) continue;
+            values.push(value);
+        }
+
+        return values.length > 0 ? values.join(' ').replace(/\s+/g, ' ').trim() : null;
+    }
+
+    return null;
+}
+
+function shouldSkipPdfValue(value: string, stopLabels: string[], skipFragments: string[]): boolean {
+    const lower = value.toLowerCase();
+    if (/^[-\d\s/]+$/.test(value)) return true;
+    if (stopLabels.some((stop) => lower.includes(stop))) return true;
+    return skipFragments.some((skip) => lower.includes(skip));
+}
+
+function toReadableEnglish(value: string): string {
+    return value
+        .replace(/[^\x20-\x7E]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+}
+
+function inferIndianState(text: string): string | null {
+    const normalized = text.toLowerCase();
+    const matched = INDIAN_STATES.find((state) => normalized.includes(state.toLowerCase()));
+    return matched ?? null;
+}
+
+function isIndianState(value: string): boolean {
+    return INDIAN_STATES.some((state) => state.toLowerCase() === value.trim().toLowerCase());
+}
+
+function titleCase(value: string): string {
+    return value
+        .toLowerCase()
+        .split(/\s+/)
+        .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+        .join(' ');
 }
 
 function cleanString(value: unknown): string | null {
@@ -366,6 +581,29 @@ function cleanString(value: unknown): string | null {
 function finiteNumber(value: unknown): number | null {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function isDateInRange(value: string | null, from: string | null, to: string | null): boolean {
+    if (!value) return false;
+
+    const timestamp = Date.parse(value);
+    if (Number.isNaN(timestamp)) return false;
+
+    if (from) {
+        const fromTimestamp = Date.parse(from);
+        if (!Number.isNaN(fromTimestamp) && timestamp < fromTimestamp) return false;
+    }
+
+    if (to) {
+        const toTimestamp = Date.parse(to);
+        if (!Number.isNaN(toTimestamp)) {
+            const toDate = new Date(toTimestamp);
+            toDate.setUTCHours(23, 59, 59, 999);
+            if (timestamp > toDate.getTime()) return false;
+        }
+    }
+
+    return true;
 }
 
 async function randomDelay(min = 1000, max = 3000): Promise<void> {
@@ -396,3 +634,42 @@ function errorMessage(error: unknown): string {
 type FetchInitWithDispatcher = RequestInit & {
     dispatcher?: ProxyAgent;
 };
+
+const INDIAN_STATES = [
+    'Andhra Pradesh',
+    'Arunachal Pradesh',
+    'Assam',
+    'Bihar',
+    'Chhattisgarh',
+    'Goa',
+    'Gujarat',
+    'Haryana',
+    'Himachal Pradesh',
+    'Jharkhand',
+    'Karnataka',
+    'Kerala',
+    'Madhya Pradesh',
+    'Maharashtra',
+    'Manipur',
+    'Meghalaya',
+    'Mizoram',
+    'Nagaland',
+    'Odisha',
+    'Punjab',
+    'Rajasthan',
+    'Sikkim',
+    'Tamil Nadu',
+    'Telangana',
+    'Tripura',
+    'Uttar Pradesh',
+    'Uttarakhand',
+    'West Bengal',
+    'Andaman and Nicobar Islands',
+    'Chandigarh',
+    'Dadra and Nagar Haveli and Daman and Diu',
+    'Delhi',
+    'Jammu and Kashmir',
+    'Ladakh',
+    'Lakshadweep',
+    'Puducherry',
+];

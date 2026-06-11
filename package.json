@@ -13,11 +13,13 @@
     "dependencies": {
         "apify": "^3.7.2",
         "crawlee": "^3.17.0",
+        "pdf-parse": "^1.1.1",
         "playwright": "^1.54.2",
         "undici": "^7.16.0"
     },
     "devDependencies": {
         "@types/node": "^24.10.1",
+        "@types/pdf-parse": "^1.1.5",
         "typescript": "^5.9.3"
     },
     "engines": {

@@ -28,33 +28,33 @@
         },
         "state": {
             "title": "State",
-            "description": "Optional state filter when the source exposes state/location data.",
+            "description": "Optional state filter from enriched GeM detail PDFs when available.",
             "type": "string",
             "editor": "textfield"
         },
         "minValue": {
             "title": "Minimum Tender Value (INR)",
-            "description": "Optional minimum tender value. Applied when the source exposes value data.",
+            "description": "Optional minimum tender value. Records with unknown value are excluded when this filter is used.",
             "type": "number",
             "minimum": 0,
             "editor": "number"
         },
         "maxValue": {
             "title": "Maximum Tender Value (INR)",
-            "description": "Optional maximum tender value. Applied when the source exposes value data.",
+            "description": "Optional maximum tender value. Records with unknown value are excluded when this filter is used.",
             "type": "number",
             "minimum": 0,
             "editor": "number"
         },
         "dateFrom": {
             "title": "Date From",
-            "description": "Optional date filter. For GeM this maps to bid end date because published date is not exposed in the public list feed.",
+            "description": "Optional published-date filter applied after GeM detail PDF enrichment.",
             "type": "string",
             "editor": "textfield"
         },
         "dateTo": {
             "title": "Date To",
-            "description": "Optional date filter. For GeM this maps to bid end date because published date is not exposed in the public list feed.",
+            "description": "Optional published-date filter applied after GeM detail PDF enrichment.",
             "type": "string",
             "editor": "textfield"
         },

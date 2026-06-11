@@ -1,8 +1,10 @@
-# India Government Tenders Scraper - GeM Leads
+# India Government Tenders Scraper - GeM & CPPP Portal
 
-Scrape Indian government tender leads for B2B sales and procurement research. The actor uses the public GeM bid listing AJAX endpoint to collect live bid opportunities by keyword, department/ministry, status, and bid-end date filters. It deduplicates by tender ID and saves a clean one-row-per-tender dataset for CRMs, market intelligence workflows, and downstream enrichment.
+Scrape Indian government tender leads for B2B sales, procurement research, and public-sector opportunity tracking. The actor searches the live GeM bid listing endpoint by keyword, deduplicates tenders by ID, then enriches each GeM result from its public bid PDF when available. PDF enrichment fills practical lead fields such as publishing date, bid opening date, bid validity, organization, ministry, department, state/location hints, EMD amount, and eligibility summary.
 
-CPPP support is guarded: the public CPPP listing currently presents a CAPTCHA before tender results. When CPPP is selected, the actor detects this and skips CPPP without pushing placeholder rows or charging `tender-scraped` events. This keeps monetization honest while preserving the input contract for future CPPP endpoint work.
+The actor accepts multiple keywords in one run, supports up to 500 matching tenders per keyword, and saves clean records to the Apify Dataset. Filters are applied after enrichment where the public source exposes the field, so state and published-date filters use the recovered GeM detail data instead of rough listing text. Pay-per-event charging happens only after a real tender record is pushed to the dataset.
+
+CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before tender results are exposed. When CPPP is selected, the actor detects the gate, skips CPPP without placeholder rows, and does not charge `tender-scraped` events for unavailable records. This keeps the dataset honest while preserving the schema for future CPPP access improvements.
 
 ## Use Cases
 
@@ -21,7 +23,8 @@ CPPP support is guarded: the public CPPP listing currently presents a CAPTCHA be
     "state": "Maharashtra",
     "maxResults": 10,
     "proxyConfiguration": {
-        "useApifyProxy": false
+        "useApifyProxy": true,
+        "apifyProxyGroups": ["RESIDENTIAL"]
     }
 }
 ```
@@ -30,12 +33,13 @@ CPPP support is guarded: the public CPPP listing currently presents a CAPTCHA be
 | --- | --- | --- |
 | `source` | string | `gem`, `cppp`, or `both` |
 | `keywords` | string[] | Search keywords, processed sequentially |
-| `department` | string | Optional ministry/department text filter |
-| `state` | string | Optional state filter when exposed by source |
-| `minValue` / `maxValue` | number | Applied when tender value is exposed |
-| `dateFrom` / `dateTo` | string | For GeM, maps to bid end date |
+| `department` | string | Optional ministry, department, or organization text filter |
+| `state` | string | Optional state filter from enriched GeM detail PDFs |
+| `minValue` / `maxValue` | number | Optional tender value range; unknown values are excluded when this filter is used |
+| `dateFrom` / `dateTo` | string | Optional published-date range applied after GeM PDF enrichment |
 | `status` | string | `active`, `closed`, or `all` |
-| `maxResults` | number | Max records per keyword, up to 500 |
+| `maxResults` | number | Max matching records per keyword, up to 500 |
+| `proxyConfiguration` | object | Apify Proxy settings; residential proxy is recommended on Apify |
 
 ## Sample GeM Output
 
@@ -46,22 +50,28 @@ CPPP support is guarded: the public CPPP listing currently presents a CAPTCHA be
     "tenderId": "GEM/2026/B/7605079",
     "tenderReferenceNumber": "GEM/2026/B/7605079",
     "tenderTitle": "Annual Maintenance Service - Desktops, Laptops and Peripherals",
-    "organization": "Department of Defence",
-    "department": "Department of Defence",
-    "ministry": "Ministry of Defence",
+    "organization": "Indian Coast Guard",
+    "department": "Department Of Defence",
+    "ministry": "Ministry Of Defence",
     "category": "Annual Maintenance Service - Desktops, Laptops and Peripherals",
     "tenderType": "bid",
     "tenderValue": null,
     "bidSubmissionStartDate": "2026-06-02T16:26:48.000Z",
     "bidSubmissionEndDate": "2026-06-12T10:00:00.000Z",
-    "tenderOpenDate": null,
-    "publishedDate": null,
+    "tenderOpenDate": "2026-06-12T10:30:00.000Z",
+    "publishedDate": "2026-06-02T00:00:00.000Z",
     "closingDate": "2026-06-12T10:00:00.000Z",
+    "bidValidity": "180 (Days)",
     "tenderStatus": "active",
-    "emdAmount": null,
+    "city": null,
+    "state": "Karnataka",
+    "location": "Karnataka",
+    "eligibilityCriteriaSummary": "Minimum average annual turnover: 5 Lakh (s); Past experience required: 4 Year (s); MSE relaxation: Yes | Complete",
+    "emdAmount": 23000,
+    "tenderDocumentFee": null,
     "tenderUrl": "https://bidplus.gem.gov.in/showbidDocument/9402098",
     "corrigendumCount": null,
-    "scrapedAt": "2026-06-11T12:30:00.000Z"
+    "scrapedAt": "2026-06-11T14:31:30.540Z"
 }
 ```
 
@@ -101,7 +111,8 @@ The CPPP object above shows the intended schema. Current CPPP public pages are C
 
 ## Notes
 
-- GeM public list feed does not expose tender value, EMD, eligibility, city, or state in the search result payload, so those fields remain `null` unless exposed by a future public endpoint.
+- GeM tender value, tender document fee, and corrigendum count are left `null` when they are not exposed by the public listing or bid PDF.
+- GeM state/location is inferred from public bid PDF text when available. Records without a matched state are excluded only when a state filter is provided.
 - No placeholder rows are pushed.
 - No PPE event is charged unless `Actor.pushData()` succeeds for a real tender record.
 - Data is for lead generation and research, not legal or procurement advice.
