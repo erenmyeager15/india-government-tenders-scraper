@@ -1,0 +1,84 @@
+{
+    "actorSpecification": 1,
+    "name": "india-government-tenders-scraper",
+    "title": "India Government Tenders Scraper - GeM Leads",
+    "description": "Scrape Indian government tender leads from GeM bid listings, with guarded CPPP handling when the public listing is CAPTCHA-gated.",
+    "version": "1.0",
+    "categories": ["BUSINESS", "LEAD_GENERATION", "RESEARCH"],
+    "dockerfile": "Dockerfile",
+    "input": "../INPUT_SCHEMA.json",
+    "storages": {
+        "dataset": {
+            "actorSpecification": 1,
+            "views": {
+                "tenders": {
+                    "title": "Tender Records",
+                    "transformation": {
+                        "fields": [
+                            "source",
+                            "keyword",
+                            "tenderId",
+                            "tenderTitle",
+                            "organization",
+                            "department",
+                            "ministry",
+                            "category",
+                            "tenderType",
+                            "tenderValue",
+                            "bidSubmissionStartDate",
+                            "bidSubmissionEndDate",
+                            "publishedDate",
+                            "closingDate",
+                            "tenderStatus",
+                            "state",
+                            "emdAmount",
+                            "tenderDocumentFee",
+                            "tenderUrl",
+                            "corrigendumCount",
+                            "scrapedAt"
+                        ]
+                    },
+                    "display": {
+                        "component": "table",
+                        "properties": {
+                            "source": { "label": "Source", "format": "text" },
+                            "keyword": { "label": "Keyword", "format": "text" },
+                            "tenderId": { "label": "Tender ID", "format": "text" },
+                            "tenderTitle": { "label": "Title", "format": "text" },
+                            "organization": { "label": "Organization", "format": "text" },
+                            "ministry": { "label": "Ministry", "format": "text" },
+                            "category": { "label": "Category", "format": "text" },
+                            "tenderType": { "label": "Type", "format": "text" },
+                            "bidSubmissionEndDate": { "label": "Bid End", "format": "date" },
+                            "tenderStatus": { "label": "Status", "format": "text" },
+                            "tenderUrl": { "label": "URL", "format": "link" },
+                            "scrapedAt": { "label": "Scraped At", "format": "date" }
+                        }
+                    }
+                }
+            }
+        }
+    },
+    "pricingInfo": {
+        "pricingModel": "PAY_PER_EVENT",
+        "pricingPerEvent": {
+            "actorChargeEvents": {
+                "tender-scraped": {
+                    "eventTitle": "Tender scraped",
+                    "eventDescription": "Charged once for each clean tender lead saved to the dataset.",
+                    "eventPriceUsd": 0.003,
+                    "isPrimaryEvent": true,
+                    "isOneTimeEvent": false
+                }
+            }
+        }
+    },
+    "defaultRunOptions": {
+        "build": "latest",
+        "memoryMbytes": 4096,
+        "timeoutSecs": 43200
+    },
+    "minMemoryMbytes": 2048,
+    "maxMemoryMbytes": 8192,
+    "webScraper": false
+}

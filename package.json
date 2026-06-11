@@ -1,0 +1,26 @@
+{
+    "name": "india-government-tenders-scraper",
+    "version": "1.0.0",
+    "type": "module",
+    "description": "Apify Actor for Indian government tender leads from GeM and guarded CPPP access",
+    "author": "Apify Actor",
+    "license": "Apache-2.0",
+    "main": "dist/main.js",
+    "scripts": {
+        "build": "tsc",
+        "start": "node dist/main.js"
+    },
+    "dependencies": {
+        "apify": "^3.7.2",
+        "crawlee": "^3.17.0",
+        "playwright": "^1.54.2",
+        "undici": "^7.16.0"
+    },
+    "devDependencies": {
+        "@types/node": "^24.10.1",
+        "typescript": "^5.9.3"
+    },
+    "engines": {
+        "node": ">=20.0.0"
+    }
+}

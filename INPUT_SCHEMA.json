@@ -1,0 +1,89 @@
+{
+    "title": "India Government Tenders Scraper",
+    "description": "Collect Indian government tender leads from GeM and guarded CPPP access.",
+    "type": "object",
+    "schemaVersion": 1,
+    "required": ["source", "keywords"],
+    "properties": {
+        "source": {
+            "title": "Tender Source",
+            "description": "Choose GeM, CPPP, or both. CPPP is skipped without charge when its public listing shows CAPTCHA.",
+            "type": "string",
+            "enum": ["gem", "cppp", "both"],
+            "default": "gem",
+            "editor": "select"
+        },
+        "keywords": {
+            "title": "Search Keywords",
+            "description": "Tender search keywords. Multiple keywords are searched sequentially.",
+            "type": "array",
+            "editor": "stringList",
+            "default": ["laptop"]
+        },
+        "department": {
+            "title": "Department / Ministry",
+            "description": "Optional department or ministry text filter.",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "state": {
+            "title": "State",
+            "description": "Optional state filter when the source exposes state/location data.",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "minValue": {
+            "title": "Minimum Tender Value (INR)",
+            "description": "Optional minimum tender value. Applied when the source exposes value data.",
+            "type": "number",
+            "minimum": 0,
+            "editor": "number"
+        },
+        "maxValue": {
+            "title": "Maximum Tender Value (INR)",
+            "description": "Optional maximum tender value. Applied when the source exposes value data.",
+            "type": "number",
+            "minimum": 0,
+            "editor": "number"
+        },
+        "dateFrom": {
+            "title": "Date From",
+            "description": "Optional date filter. For GeM this maps to bid end date because published date is not exposed in the public list feed.",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "dateTo": {
+            "title": "Date To",
+            "description": "Optional date filter. For GeM this maps to bid end date because published date is not exposed in the public list feed.",
+            "type": "string",
+            "editor": "textfield"
+        },
+        "status": {
+            "title": "Tender Status",
+            "description": "Tender status filter.",
+            "type": "string",
+            "enum": ["active", "closed", "all"],
+            "default": "active",
+            "editor": "select"
+        },
+        "maxResults": {
+            "title": "Max Results Per Keyword",
+            "description": "Maximum tender records per keyword, up to 500.",
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 500,
+            "default": 10,
+            "editor": "number"
+        },
+        "proxyConfiguration": {
+            "title": "Proxy Configuration",
+            "description": "Proxy settings for scraping.",
+            "type": "object",
+            "editor": "proxy",
+            "default": {
+                "useApifyProxy": true,
+                "apifyProxyGroups": ["RESIDENTIAL"]
+            }
+        }
+    }
+}
