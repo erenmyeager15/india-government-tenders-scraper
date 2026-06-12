@@ -1,6 +1,6 @@
 {
     "title": "India Government Tenders Scraper",
-    "description": "Collect Indian government tender leads from GeM and guarded CPPP access.",
+    "description": "Collect Indian government tender listings from GeM and guarded CPPP access.",
     "type": "object",
     "schemaVersion": 1,
     "required": ["source", "keywords"],

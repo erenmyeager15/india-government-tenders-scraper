@@ -125,3 +125,9 @@ The CPPP object above shows the intended schema. Current CPPP public pages are C
 - No placeholder rows are pushed.
 - No PPE event is charged unless `Actor.pushData()` succeeds for a real tender record.
 - Data is for lead generation and research, not legal or procurement advice.
+
+## Responsible Use
+
+This Actor is intended for lawful collection of publicly available information only. Users are responsible for ensuring their use complies with the source website's terms, robots.txt, applicable privacy laws, including India's DPDP Act, and all local regulations.
+
+Do not use this Actor to collect, store, sell, or misuse personal data without a lawful basis. The Actor author is not responsible for misuse by end users.
