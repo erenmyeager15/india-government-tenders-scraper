@@ -7,6 +7,7 @@
     "categories": ["BUSINESS", "RESEARCH"],
     "dockerfile": "Dockerfile",
     "input": "../INPUT_SCHEMA.json",
+    "output": "./output_schema.json",
     "storages": {
         "dataset": {
             "actorSpecification": 1,
@@ -69,6 +70,13 @@
         "pricingModel": "PAY_PER_EVENT",
         "pricingPerEvent": {
             "actorChargeEvents": {
+                "apify-actor-start": {
+                    "eventTitle": "Actor Start",
+                    "eventDescription": "Automatically charged from allocated memory when a run starts, covering source access and session setup.",
+                    "eventPriceUsd": 0.001,
+                    "isPrimaryEvent": false,
+                    "isOneTimeEvent": true
+                },
                 "tender-scraped": {
                     "eventTitle": "Tender scraped",
                     "eventDescription": "Charged once for each clean tender listing saved to the dataset.",
@@ -81,10 +89,10 @@
     },
     "defaultRunOptions": {
         "build": "latest",
-        "memoryMbytes": 4096,
-        "timeoutSecs": 43200
+        "memoryMbytes": 2048,
+        "timeoutSecs": 3600
     },
     "minMemoryMbytes": 2048,
-    "maxMemoryMbytes": 8192,
+    "maxMemoryMbytes": 4096,
     "webScraper": false
 }

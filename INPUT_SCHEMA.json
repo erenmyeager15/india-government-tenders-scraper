@@ -15,9 +15,10 @@
         },
         "keywords": {
             "title": "Search Keywords",
-            "description": "Tender search keywords. Multiple keywords are searched sequentially.",
+            "description": "Tender search keywords. Up to 5 keywords are processed sequentially to keep runs cost-safe.",
             "type": "array",
             "editor": "stringList",
+            "maxItems": 5,
             "default": ["laptop"]
         },
         "department": {
@@ -68,22 +69,12 @@
         },
         "maxResults": {
             "title": "Max Results Per Keyword",
-            "description": "Maximum tender records per keyword, up to 500.",
+            "description": "Maximum tender records per keyword, up to 50. Start with 10 for testing.",
             "type": "integer",
             "minimum": 1,
-            "maximum": 500,
+            "maximum": 50,
             "default": 10,
             "editor": "number"
-        },
-        "proxyConfiguration": {
-            "title": "Proxy Configuration",
-            "description": "Proxy settings for scraping.",
-            "type": "object",
-            "editor": "proxy",
-            "default": {
-                "useApifyProxy": true,
-                "apifyProxyGroups": ["RESIDENTIAL"]
-            }
         }
     }
 }

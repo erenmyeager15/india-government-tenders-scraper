@@ -13,8 +13,11 @@ const GEM_BASE_URL = 'https://bidplus.gem.gov.in';
 const CPPP_ACTIVE_URL = 'https://eprocure.gov.in/eprocure/app?page=FrontEndLatestActiveTenders&service=page';
 const USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
-const REQUEST_TIMEOUT_MS = 60000;
-const MAX_RETRIES = 3;
+const REQUEST_TIMEOUT_MS = 25000;
+const MAX_RETRIES = 2;
+const DEFAULT_MAX_RESULTS_PER_KEYWORD = 10;
+const MAX_RESULTS_PER_KEYWORD = 50;
+const MAX_KEYWORDS_PER_RUN = 5;
 
 interface GemSession {
     csrfToken: string;
@@ -35,8 +38,19 @@ interface GemSearchResponse {
     };
 }
 
+type TenderRecordHandler = (record: TenderRecord) => Promise<boolean>;
+
 export function normalizeInput(input: ActorInput | null): NormalizedInput {
-    const keywords = [...new Set((input?.keywords?.length ? input.keywords : ['laptop']).map((keyword) => keyword.trim()).filter(Boolean))];
+    const allKeywords = [
+        ...new Set((input?.keywords?.length ? input.keywords : ['laptop']).map((keyword) => keyword.trim()).filter(Boolean)),
+    ];
+    const keywords = allKeywords.slice(0, MAX_KEYWORDS_PER_RUN);
+    if (allKeywords.length > MAX_KEYWORDS_PER_RUN) {
+        log.warning(
+            `Input contained ${allKeywords.length} keywords. Processing first ${MAX_KEYWORDS_PER_RUN} to keep public runs cost-safe.`,
+        );
+    }
+
     return {
         source: input?.source ?? 'gem',
         keywords,
@@ -47,42 +61,67 @@ export function normalizeInput(input: ActorInput | null): NormalizedInput {
         dateFrom: cleanString(input?.dateFrom),
         dateTo: cleanString(input?.dateTo),
         status: input?.status ?? 'active',
-        maxResults: Math.max(1, Math.min(500, Math.trunc(input?.maxResults ?? 100))),
+        maxResults: Math.max(
+            1,
+            Math.min(MAX_RESULTS_PER_KEYWORD, Math.trunc(input?.maxResults ?? DEFAULT_MAX_RESULTS_PER_KEYWORD)),
+        ),
         proxyConfiguration: input?.proxyConfiguration,
     };
 }
 
-export async function scrapeTenders(rawInput: ActorInput | null): Promise<TenderRecord[]> {
+export async function scrapeTenders(
+    rawInput: ActorInput | null,
+    onRecord?: TenderRecordHandler,
+): Promise<TenderRecord[]> {
     const input = normalizeInput(rawInput);
     const records: TenderRecord[] = [];
+    const seen = new Set<string>();
+    const consume = async (record: TenderRecord): Promise<boolean> => {
+        if (!isChargeableTender(record)) return true;
+        const key = `${record.source}:${record.tenderId}`;
+        if (seen.has(key)) return true;
+
+        if (onRecord && !(await onRecord(record))) return false;
+        seen.add(key);
+        records.push(record);
+        return true;
+    };
 
     if (input.source === 'gem' || input.source === 'both') {
-        records.push(...(await scrapeGem(input)));
+        const stopped = await scrapeGem(input, consume);
+        if (stopped) return records;
     }
 
     if (input.source === 'cppp' || input.source === 'both') {
-        records.push(...(await scrapeCpppGuarded(input)));
+        for (const record of await scrapeCpppGuarded(input)) {
+            if (!(await consume(record))) break;
+        }
     }
 
-    return deduplicate(records).filter(isChargeableTender);
+    return records;
 }
 
 export function isChargeableTender(record: TenderRecord): boolean {
     return Boolean(record.tenderId && record.tenderTitle);
 }
 
-async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
-    const proxyConfiguration = input.proxyConfiguration?.useApifyProxy === false
-        ? undefined
-        : await Actor.createProxyConfiguration({
-            groups: input.proxyConfiguration?.apifyProxyGroups ?? ['RESIDENTIAL'],
-            countryCode: input.proxyConfiguration?.apifyProxyCountry ?? 'IN',
-        });
+async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): Promise<boolean> {
+    const proxyConfiguration = await Actor.createProxyConfiguration({
+        groups: ['RESIDENTIAL'],
+        countryCode: 'IN',
+    });
+    if (!proxyConfiguration) {
+        throw new Error('GeM requires Apify Residential Proxy with country India, but proxy configuration was not created.');
+    }
 
-    const proxyUrl = proxyConfiguration ? await proxyConfiguration.newUrl() : undefined;
-    log.info(`GeM network mode: ${proxyUrl ? 'Apify Proxy enabled' : 'direct connection'}`);
-    const session = await createGemSession(proxyUrl);
-    const records: TenderRecord[] = [];
+    const proxyUrl = await proxyConfiguration.newUrl();
+    log.info('GeM network mode: Apify Residential Proxy, country=IN');
+    let session: GemSession;
+    try {
+        session = await createGemSession(proxyUrl);
+    } catch (error) {
+        throw new Error(`GeM Residential India proxy session failed: ${errorMessage(error)}`);
+    }
 
     for (const keyword of input.keywords) {
         let page = 1;
@@ -101,7 +140,7 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
                 if (scrapedForKeyword >= input.maxResults) break;
                 const record = await enrichGemRecord(mapGemDoc(doc, keyword), session);
                 if (!passesClientFilters(record, input)) continue;
-                records.push(record);
+                if (!(await consume(record))) return true;
                 scrapedForKeyword += 1;
             }
 
@@ -111,7 +150,7 @@ async function scrapeGem(input: NormalizedInput): Promise<TenderRecord[]> {
         }
     }
 
-    return records;
+    return false;
 }
 
 async function enrichGemRecord(record: TenderRecord, session: GemSession): Promise<TenderRecord> {
@@ -611,16 +650,6 @@ async function randomDelay(min = 1000, max = 3000): Promise<void> {
     const ms = Math.floor(Math.random() * (max - min + 1)) + min;
     await new Promise((resolve) => {
         setTimeout(resolve, ms);
-    });
-}
-
-function deduplicate(records: TenderRecord[]): TenderRecord[] {
-    const seen = new Set<string>();
-    return records.filter((record) => {
-        const key = `${record.source}:${record.tenderId}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
     });
 }
 

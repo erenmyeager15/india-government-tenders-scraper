@@ -2,9 +2,5 @@
     "source": "gem",
     "keywords": ["laptop"],
     "state": "Maharashtra",
-    "maxResults": 10,
-    "proxyConfiguration": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": ["RESIDENTIAL"]
-    }
+    "maxResults": 10
 }

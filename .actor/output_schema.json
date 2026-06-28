@@ -1,0 +1,14 @@
+{
+  "actorOutputSchemaVersion": 1,
+  "title": "India Government Tenders Output",
+  "description": "Structured Indian government tender records from GeM and supported public tender sources, including tender IDs, titles, organizations, deadlines, status, locations, eligibility summaries, EMD values, URLs, and scraped timestamps.",
+  "type": "object",
+  "properties": {
+    "results": {
+      "type": "string",
+      "title": "Tender records",
+      "description": "Clean dataset items containing public Indian government tender and procurement opportunity details.",
+      "template": "{{links.apiDefaultDatasetUrl}}/items"
+    }
+  }
+}

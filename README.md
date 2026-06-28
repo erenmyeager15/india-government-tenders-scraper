@@ -2,7 +2,9 @@
 
 Scrape Indian government tender leads for B2B sales, procurement research, and public-sector opportunity tracking. The actor searches the live GeM bid listing endpoint by keyword, deduplicates tenders by ID, then enriches each GeM result from its public bid PDF when available. PDF enrichment fills practical lead fields such as publishing date, bid opening date, bid validity, organization, ministry, department, state/location hints, EMD amount, and eligibility summary. Export to JSON, CSV, Excel, or HTML, or pull via the Apify API — no login and no API key required.
 
-The actor accepts multiple keywords in one run, supports up to 500 matching tenders per keyword, and saves clean records to the Apify Dataset. Filters are applied after enrichment where the public source exposes the field, so state and published-date filters use the recovered GeM detail data instead of rough listing text. Pay-per-event charging happens only after a real tender record is pushed to the dataset.
+The actor accepts up to 5 keywords in one run, supports up to 50 matching tenders per keyword, and saves clean records to the Apify Dataset. Filters are applied after enrichment where the public source exposes the field, so state and published-date filters use the recovered GeM detail data instead of rough listing text. A small memory-based run-start event covers source access and proxy/session setup, and per-record charging happens only after a real tender record is pushed to the dataset.
+
+GeM currently requires Residential India proxy routing for reliable public access. The actor handles this automatically under the hood so users do not need to configure proxies manually.
 
 CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before tender results are exposed. When CPPP is selected, the actor detects the gate, skips CPPP without placeholder rows, and does not charge `tender-scraped` events for unavailable records. This keeps the dataset honest while preserving the schema for future CPPP access improvements.
 
@@ -29,11 +31,7 @@ CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before
     "source": "gem",
     "keywords": ["laptop"],
     "state": "Maharashtra",
-    "maxResults": 10,
-    "proxyConfiguration": {
-        "useApifyProxy": true,
-        "apifyProxyGroups": ["RESIDENTIAL"]
-    }
+    "maxResults": 10
 }
 ```
 
@@ -46,8 +44,8 @@ CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before
 | `minValue` / `maxValue` | number | Optional tender value range; unknown values are excluded when this filter is used |
 | `dateFrom` / `dateTo` | string | Optional published-date range applied after GeM PDF enrichment |
 | `status` | string | `active`, `closed`, or `all` |
-| `maxResults` | number | Max matching records per keyword, up to 500 |
-| `proxyConfiguration` | object | Apify Proxy settings; residential proxy is recommended on Apify |
+| `maxResults` | number | Max matching records per keyword, up to 50 |
+| Proxy routing | automatic | The actor uses Residential India proxy routing internally because GeM blocks datacenter and non-India routes |
 
 ## Sample GeM Output
 
@@ -113,9 +111,10 @@ The CPPP object above shows the intended schema. Current CPPP public pages are C
 
 | Event | Price |
 | --- | --- |
+| `apify-actor-start` | $0.001 per allocated GB, minimum one event per run |
 | `tender-scraped` | $0.003 per clean tender record |
-| 1,000 tenders | $3.00 |
-| 10,000 tenders | $30.00 |
+| 100 tenders | $0.30 plus the small memory-based run-start charge |
+| 1,000 tenders | $3.00 plus the small memory-based run-start charge |
 
 ## Notes
 
@@ -123,7 +122,7 @@ The CPPP object above shows the intended schema. Current CPPP public pages are C
 - The default Apify table view focuses on populated GeM lead fields and hides GeM-only unavailable value, fee, and corrigendum columns.
 - GeM state/location is inferred from public bid PDF text when available. Records without a matched state are excluded only when a state filter is provided.
 - No placeholder rows are pushed.
-- No PPE event is charged unless `Actor.pushData()` succeeds for a real tender record.
+- Dataset saving and `tender-scraped` charging use one atomic operation. When a user's maximum charge is reached, the actor stops before making more tender or PDF-enrichment requests.
 - Data is for lead generation and research, not legal or procurement advice.
 
 ## Responsible Use
