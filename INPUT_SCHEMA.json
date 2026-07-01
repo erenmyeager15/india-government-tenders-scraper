@@ -1,13 +1,13 @@
 {
     "title": "India Government Tenders Scraper",
-    "description": "Collect Indian government tender listings from GeM and guarded CPPP access.",
+    "description": "Low-cost sample: collect 1 public GeM tender for the keyword laptop. GeM uses Residential India routing internally; CPPP is guarded because the public listing is CAPTCHA-gated.",
     "type": "object",
     "schemaVersion": 1,
     "required": ["source", "keywords"],
     "properties": {
         "source": {
             "title": "Tender Source",
-            "description": "Choose GeM, CPPP, or both. CPPP is skipped without charge when its public listing shows CAPTCHA.",
+            "description": "Choose GeM, CPPP, or both. GeM is the reliable default. CPPP is skipped without tender-scraped charges when its public listing shows CAPTCHA.",
             "type": "string",
             "enum": ["gem", "cppp", "both"],
             "default": "gem",
@@ -15,7 +15,7 @@
         },
         "keywords": {
             "title": "Search Keywords",
-            "description": "Tender search keywords. Up to 5 keywords are processed sequentially to keep runs cost-safe.",
+            "description": "Tender search keywords. Up to 5 keywords are processed sequentially to keep runs cost-safe. Start with one keyword.",
             "type": "array",
             "editor": "stringList",
             "maxItems": 5,
@@ -69,11 +69,11 @@
         },
         "maxResults": {
             "title": "Max Results Per Keyword",
-            "description": "Maximum tender records per keyword, up to 50. Start with 10 for testing.",
+            "description": "Maximum tender records per keyword, up to 50. Start with 1 for a low-cost test.",
             "type": "integer",
             "minimum": 1,
             "maximum": 50,
-            "default": 10,
+            "default": 1,
             "editor": "number"
         }
     }

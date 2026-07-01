@@ -1,6 +1,6 @@
 {
     "source": "gem",
     "keywords": ["laptop"],
-    "state": "Maharashtra",
-    "maxResults": 10
+    "status": "active",
+    "maxResults": 1
 }

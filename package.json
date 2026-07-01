@@ -8,6 +8,9 @@
     "main": "dist/main.js",
     "scripts": {
         "build": "tsc",
+        "lint": "tsc --noEmit",
+        "typecheck": "tsc --noEmit",
+        "test": "npm run build && node --test dist/billing.test.js dist/routes.test.js",
         "start": "node dist/main.js"
     },
     "dependencies": {

@@ -1,0 +1,11 @@
+node_modules/
+dist/
+.git/
+.apify/
+storage/
+apify_storage/
+crawlee_storage/
+*.log
+.env
+input.json
+test_input.json

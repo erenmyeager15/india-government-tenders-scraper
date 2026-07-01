@@ -15,9 +15,12 @@ const USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
 const REQUEST_TIMEOUT_MS = 25000;
 const MAX_RETRIES = 2;
-const DEFAULT_MAX_RESULTS_PER_KEYWORD = 10;
+const DEFAULT_MAX_RESULTS_PER_KEYWORD = 1;
 const MAX_RESULTS_PER_KEYWORD = 50;
 const MAX_KEYWORDS_PER_RUN = 5;
+const DEFAULT_KEYWORDS = ['laptop'];
+const VALID_SOURCES = new Set(['gem', 'cppp', 'both']);
+const VALID_STATUSES = new Set(['active', 'closed', 'all']);
 
 interface GemSession {
     csrfToken: string;
@@ -41,9 +44,8 @@ interface GemSearchResponse {
 type TenderRecordHandler = (record: TenderRecord) => Promise<boolean>;
 
 export function normalizeInput(input: ActorInput | null): NormalizedInput {
-    const allKeywords = [
-        ...new Set((input?.keywords?.length ? input.keywords : ['laptop']).map((keyword) => keyword.trim()).filter(Boolean)),
-    ];
+    const requestedKeywords = Array.isArray(input?.keywords) ? input.keywords : DEFAULT_KEYWORDS;
+    const allKeywords = [...new Set(requestedKeywords.map((keyword) => cleanString(keyword)).filter((keyword): keyword is string => Boolean(keyword)))];
     const keywords = allKeywords.slice(0, MAX_KEYWORDS_PER_RUN);
     if (allKeywords.length > MAX_KEYWORDS_PER_RUN) {
         log.warning(
@@ -51,20 +53,31 @@ export function normalizeInput(input: ActorInput | null): NormalizedInput {
         );
     }
 
+    const source = VALID_SOURCES.has(String(input?.source)) ? input?.source as NormalizedInput['source'] : 'gem';
+    const status = VALID_STATUSES.has(String(input?.status)) ? input?.status as TenderStatus : 'active';
+    const minValue = nonNegativeNumberOrNull(input?.minValue);
+    const maxValue = nonNegativeNumberOrNull(input?.maxValue);
+    if (minValue !== null && maxValue !== null && minValue > maxValue) {
+        throw new Error('minValue cannot be greater than maxValue.');
+    }
+
+    const dateFrom = normalizedDate(input?.dateFrom, 'dateFrom');
+    const dateTo = normalizedDate(input?.dateTo, 'dateTo');
+    if (dateFrom && dateTo && Date.parse(dateFrom) > Date.parse(dateTo)) {
+        throw new Error('dateFrom cannot be after dateTo.');
+    }
+
     return {
-        source: input?.source ?? 'gem',
-        keywords,
+        source,
+        keywords: keywords.length > 0 ? keywords : DEFAULT_KEYWORDS,
         department: cleanString(input?.department),
         state: cleanString(input?.state),
-        minValue: finiteNumber(input?.minValue),
-        maxValue: finiteNumber(input?.maxValue),
-        dateFrom: cleanString(input?.dateFrom),
-        dateTo: cleanString(input?.dateTo),
-        status: input?.status ?? 'active',
-        maxResults: Math.max(
-            1,
-            Math.min(MAX_RESULTS_PER_KEYWORD, Math.trunc(input?.maxResults ?? DEFAULT_MAX_RESULTS_PER_KEYWORD)),
-        ),
+        minValue,
+        maxValue,
+        dateFrom,
+        dateTo,
+        status,
+        maxResults: normalizeMaxResults(input?.maxResults),
         proxyConfiguration: input?.proxyConfiguration,
     };
 }
@@ -621,6 +634,27 @@ function cleanString(value: unknown): string | null {
 function finiteNumber(value: unknown): number | null {
     const numberValue = Number(value);
     return Number.isFinite(numberValue) ? numberValue : null;
+}
+
+function nonNegativeNumberOrNull(value: unknown): number | null {
+    const numberValue = finiteNumber(value);
+    return numberValue !== null && numberValue >= 0 ? numberValue : null;
+}
+
+function normalizeMaxResults(value: unknown): number {
+    const numberValue = Number(value ?? DEFAULT_MAX_RESULTS_PER_KEYWORD);
+    if (!Number.isFinite(numberValue)) return 1;
+    return Math.max(1, Math.min(MAX_RESULTS_PER_KEYWORD, Math.trunc(numberValue)));
+}
+
+function normalizedDate(value: unknown, fieldName: string): string | null {
+    const cleaned = cleanString(value);
+    if (!cleaned) return null;
+    const timestamp = Date.parse(cleaned);
+    if (Number.isNaN(timestamp)) {
+        throw new Error(`${fieldName} must be a valid date.`);
+    }
+    return cleaned;
 }
 
 function isDateInRange(value: string | null, from: string | null, to: string | null): boolean {

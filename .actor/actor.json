@@ -2,11 +2,13 @@
     "actorSpecification": 1,
     "name": "india-government-tenders-scraper",
     "title": "India Government Tenders Scraper - GeM Listings",
-    "description": "Scrape Indian government tender listings from GeM bid listings, with guarded CPPP handling when the public listing is CAPTCHA-gated.",
+    "description": "Scrape public Indian government tender listings from GeM bid listings, with guarded CPPP handling when the public listing is CAPTCHA-gated.",
     "version": "1.0",
-    "categories": ["BUSINESS", "RESEARCH"],
+    "categories": ["BUSINESS", "AUTOMATION", "OTHER"],
+    "categoriesVersion": "1.0.0",
     "dockerfile": "Dockerfile",
     "input": "../INPUT_SCHEMA.json",
+    "readme": "../README.md",
     "output": "./output_schema.json",
     "storages": {
         "dataset": {
@@ -19,12 +21,14 @@
                             "source",
                             "keyword",
                             "tenderId",
+                            "tenderReferenceNumber",
                             "tenderTitle",
                             "organization",
                             "department",
                             "ministry",
                             "category",
                             "tenderType",
+                            "tenderValue",
                             "bidSubmissionStartDate",
                             "bidSubmissionEndDate",
                             "tenderOpenDate",
@@ -32,11 +36,14 @@
                             "closingDate",
                             "bidValidity",
                             "tenderStatus",
+                            "city",
                             "state",
                             "location",
                             "eligibilityCriteriaSummary",
                             "emdAmount",
+                            "tenderDocumentFee",
                             "tenderUrl",
+                            "corrigendumCount",
                             "scrapedAt"
                         ]
                     },
@@ -46,25 +53,39 @@
                             "source": { "label": "Source", "format": "text" },
                             "keyword": { "label": "Keyword", "format": "text" },
                             "tenderId": { "label": "Tender ID", "format": "text" },
+                            "tenderReferenceNumber": { "label": "Reference", "format": "text" },
                             "tenderTitle": { "label": "Title", "format": "text" },
                             "organization": { "label": "Organization", "format": "text" },
+                            "department": { "label": "Department", "format": "text" },
                             "ministry": { "label": "Ministry", "format": "text" },
                             "category": { "label": "Category", "format": "text" },
                             "tenderType": { "label": "Type", "format": "text" },
+                            "tenderValue": { "label": "Value", "format": "number" },
+                            "bidSubmissionStartDate": { "label": "Bid Start", "format": "date" },
                             "bidSubmissionEndDate": { "label": "Bid End", "format": "date" },
                             "tenderOpenDate": { "label": "Opening Date", "format": "date" },
                             "publishedDate": { "label": "Published", "format": "date" },
+                            "closingDate": { "label": "Closing", "format": "date" },
                             "bidValidity": { "label": "Bid Validity", "format": "text" },
                             "tenderStatus": { "label": "Status", "format": "text" },
+                            "city": { "label": "City", "format": "text" },
                             "state": { "label": "State", "format": "text" },
+                            "location": { "label": "Location", "format": "text" },
+                            "eligibilityCriteriaSummary": { "label": "Eligibility", "format": "text" },
                             "emdAmount": { "label": "EMD", "format": "number" },
+                            "tenderDocumentFee": { "label": "Document Fee", "format": "number" },
                             "tenderUrl": { "label": "URL", "format": "link" },
+                            "corrigendumCount": { "label": "Corrigenda", "format": "number" },
                             "scrapedAt": { "label": "Scraped At", "format": "date" }
                         }
                     }
                 }
             }
         }
+    },
+    "exampleRunInput": {
+        "body": "{\"source\":\"gem\",\"keywords\":[\"laptop\"],\"status\":\"active\",\"maxResults\":1}",
+        "contentType": "application/json; charset=utf-8"
     },
     "pricingInfo": {
         "pricingModel": "PAY_PER_EVENT",
