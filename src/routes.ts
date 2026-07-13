@@ -15,6 +15,9 @@ const USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
 const REQUEST_TIMEOUT_MS = 25000;
 const MAX_RETRIES = 2;
+const MAX_GEM_SESSION_ATTEMPTS = 2;
+const MAX_GEM_SESSION_REFRESHES = 1;
+const MAX_GEM_PAGES_PER_KEYWORD = 10;
 const DEFAULT_MAX_RESULTS_PER_KEYWORD = 1;
 const MAX_RESULTS_PER_KEYWORD = 50;
 const MAX_KEYWORDS_PER_RUN = 5;
@@ -127,40 +130,76 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
         throw new Error('GeM requires Apify Residential Proxy with country India, but proxy configuration was not created.');
     }
 
-    const proxyUrl = await proxyConfiguration.newUrl();
     log.info('GeM network mode: Apify Residential Proxy, country=IN');
-    let session: GemSession;
-    try {
-        session = await createGemSession(proxyUrl);
-    } catch (error) {
-        throw new Error(`GeM Residential India proxy session failed: ${errorMessage(error)}`);
-    }
-
-    for (const keyword of input.keywords) {
-        let page = 1;
-        let scrapedForKeyword = 0;
-
-        while (scrapedForKeyword < input.maxResults) {
-            await randomDelay();
-            const data = await fetchGemPage(session, input.status, keyword, page);
-            const docs = data.response?.response?.docs ?? [];
-            const total = data.response?.response?.numFound ?? docs.length;
-
-            log.info(`GeM keyword="${keyword}" page=${page}: ${docs.length} docs, total=${total}`);
-            if (docs.length === 0) break;
-
-            for (const doc of docs) {
-                if (scrapedForKeyword >= input.maxResults) break;
-                const record = await enrichGemRecord(mapGemDoc(doc, keyword), session);
-                if (!passesClientFilters(record, input)) continue;
-                if (!(await consume(record))) return true;
-                scrapedForKeyword += 1;
+    const openFreshSession = async (reason: string): Promise<GemSession> => {
+        let lastError: unknown;
+        for (let attempt = 1; attempt <= MAX_GEM_SESSION_ATTEMPTS; attempt += 1) {
+            const sessionId = `gem${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}${attempt}`;
+            try {
+                const proxyUrl = await proxyConfiguration.newUrl(sessionId);
+                if (!proxyUrl) throw new Error('Residential proxy URL was not created.');
+                return await createGemSession(proxyUrl);
+            } catch (error) {
+                lastError = error;
+                log.warning(
+                    `GeM ${reason} session attempt ${attempt}/${MAX_GEM_SESSION_ATTEMPTS} failed: ${errorMessage(error)}`,
+                );
             }
-
-            const start = data.response?.response?.start ?? (page - 1) * docs.length;
-            if (start + docs.length >= total) break;
-            page += 1;
         }
+        throw new Error(`GeM Residential India proxy session failed: ${errorMessage(lastError)}`);
+    };
+
+    let session = await openFreshSession('initial');
+    let sessionRefreshes = 0;
+
+    try {
+        for (const keyword of input.keywords) {
+            let page = 1;
+            let scrapedForKeyword = 0;
+
+            while (scrapedForKeyword < input.maxResults) {
+                await randomDelay();
+                let data: GemSearchResponse;
+                try {
+                    data = await fetchGemPage(session, input.status, keyword, page);
+                } catch (error) {
+                    if (sessionRefreshes >= MAX_GEM_SESSION_REFRESHES) throw error;
+                    sessionRefreshes += 1;
+                    log.warning(
+                        `GeM search session failed for keyword="${keyword}" page=${page}; opening one fresh India Residential session: ${errorMessage(error)}`,
+                    );
+                    await closeGemSession(session);
+                    session = await openFreshSession(`refresh-${sessionRefreshes}`);
+                    data = await fetchGemPage(session, input.status, keyword, page);
+                }
+
+                const docs = data.response?.response?.docs ?? [];
+                const total = data.response?.response?.numFound ?? docs.length;
+
+                log.info(`GeM keyword="${keyword}" page=${page}: ${docs.length} docs, total=${total}`);
+                if (docs.length === 0) break;
+
+                for (const doc of docs) {
+                    if (scrapedForKeyword >= input.maxResults) break;
+                    const record = await enrichGemRecord(mapGemDoc(doc, keyword), session);
+                    if (!passesClientFilters(record, input)) continue;
+                    if (!(await consume(record))) return true;
+                    scrapedForKeyword += 1;
+                }
+
+                const start = data.response?.response?.start ?? (page - 1) * docs.length;
+                if (start + docs.length >= total) break;
+                if (page >= MAX_GEM_PAGES_PER_KEYWORD) {
+                    log.warning(
+                        `Reached the ${MAX_GEM_PAGES_PER_KEYWORD}-page safety cap for keyword="${keyword}" after saving ${scrapedForKeyword} records. Narrow the filters or use another keyword for more results.`,
+                    );
+                    break;
+                }
+                page += 1;
+            }
+        }
+    } finally {
+        await closeGemSession(session);
     }
 
     return false;
@@ -191,21 +230,34 @@ async function enrichGemRecord(record: TenderRecord, session: GemSession): Promi
 
 async function createGemSession(proxyUrl: string | undefined): Promise<GemSession> {
     const dispatcher = proxyUrl ? new ProxyAgent(proxyUrl) : undefined;
-    const response = await fetchWithRetries(`${GEM_BASE_URL}/all-bids`, {
-        headers: baseGemHeaders(),
-        dispatcher,
-    });
-    const text = await response.text();
-    const csrfToken = extractCsrfToken(text);
-    if (!csrfToken) {
-        throw new Error('GeM CSRF token was not found on all-bids page.');
-    }
+    try {
+        const response = await fetchWithRetries(`${GEM_BASE_URL}/all-bids`, {
+            headers: baseGemHeaders(),
+            dispatcher,
+        });
+        const text = await response.text();
+        const csrfToken = extractCsrfToken(text);
+        if (!csrfToken) {
+            throw new Error('GeM CSRF token was not found on all-bids page.');
+        }
 
-    return {
-        csrfToken,
-        cookie: response.headers.getSetCookie?.().map((cookie) => cookie.split(';')[0]).join('; ') ?? '',
-        dispatcher,
-    };
+        return {
+            csrfToken,
+            cookie: response.headers.getSetCookie?.().map((cookie) => cookie.split(';')[0]).join('; ') ?? '',
+            dispatcher,
+        };
+    } catch (error) {
+        await dispatcher?.close();
+        throw error;
+    }
+}
+
+async function closeGemSession(session: GemSession): Promise<void> {
+    try {
+        await session.dispatcher?.close();
+    } catch (error) {
+        log.warning(`Could not close the GeM proxy session cleanly: ${errorMessage(error)}`);
+    }
 }
 
 async function fetchGemPage(session: GemSession, status: TenderStatus, keyword: string, page: number): Promise<GemSearchResponse> {
@@ -244,8 +296,10 @@ async function fetchGemPage(session: GemSession, status: TenderStatus, keyword: 
     }
 
     const data = JSON.parse(text) as GemSearchResponse;
-    if (data.code !== 200) {
-        throw new Error(`GeM returned code ${data.code ?? 'unknown'}: ${data.message ?? text.slice(0, 160)}`);
+    const responseCode = Number(data.code ?? data.status);
+    if (responseCode !== 200) {
+        const displayedCode = Number.isFinite(responseCode) ? responseCode : 'unknown';
+        throw new Error(`GeM returned code ${displayedCode}: ${data.message ?? text.slice(0, 160)}`);
     }
     return data;
 }
@@ -269,7 +323,7 @@ function buildGemFilter(status: TenderStatus): JsonObject {
     return filter;
 }
 
-function mapGemDoc(doc: JsonObject, keyword: string): TenderRecord {
+export function mapGemDoc(doc: JsonObject, keyword: string): TenderRecord {
     const bidId = firstNumber(doc, ['b_id'])?.toFixed(0) ?? firstString(doc, ['id']);
     const bidNumber = firstString(doc, ['b_bid_number']) ?? bidId ?? 'unknown';
     const category = firstString(doc, ['bd_category_name', 'b_category_name']);
@@ -373,12 +427,11 @@ async function scrapeCpppGuarded(input: NormalizedInput): Promise<TenderRecord[]
 async function fetchWithRetries(url: string, init: FetchInitWithDispatcher = {}): Promise<Response> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= MAX_RETRIES; attempt += 1) {
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
         try {
-            const controller = new AbortController();
-            const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
             const response = await fetch(url, { ...init, signal: controller.signal } as RequestInit & { dispatcher?: ProxyAgent });
-            clearTimeout(timeout);
-            if ([403, 429, 500, 502, 503, 504].includes(response.status)) {
+            if (!response.ok) {
                 throw new Error(`HTTP ${response.status} from ${url}`);
             }
             return response;
@@ -386,6 +439,8 @@ async function fetchWithRetries(url: string, init: FetchInitWithDispatcher = {})
             lastError = error;
             log.warning(`Fetch attempt ${attempt}/${MAX_RETRIES} failed for ${url}: ${errorMessage(error)}`);
             if (attempt < MAX_RETRIES) await randomDelay(1000, 3000);
+        } finally {
+            clearTimeout(timeout);
         }
     }
     throw lastError instanceof Error ? lastError : new Error(String(lastError));
@@ -400,9 +455,11 @@ function baseGemHeaders(): Record<string, string> {
     };
 }
 
-function extractCsrfToken(html: string): string | null {
+export function extractCsrfToken(html: string): string | null {
     return (
         html.match(/'csrf_bd_gem_nk'\s*:\s*'([^']+)'/)?.[1]
+        ?? html.match(/name=["']csrf_bd_gem_nk["'][^>]*value=["']([^"']+)["']/i)?.[1]
+        ?? html.match(/value=["']([^"']+)["'][^>]*name=["']csrf_bd_gem_nk["']/i)?.[1]
         ?? html.match(/csrf_bd_gem_nk=([a-f0-9]{32})/i)?.[1]
         ?? html.match(/csrf_bd_gem_nk["']?\s*[:=]\s*["']([a-f0-9]{32})/i)?.[1]
         ?? null

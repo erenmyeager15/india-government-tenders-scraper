@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { isChargeableTender, normalizeInput } from './routes.js';
+import { extractCsrfToken, isChargeableTender, mapGemDoc, normalizeInput } from './routes.js';
 import type { TenderRecord } from './types.js';
 
 test('normalizes to the low-cost GeM default', () => {
@@ -50,4 +50,33 @@ test('identifies chargeable tender records only when title and id exist', () => 
     assert.equal(isChargeableTender(record), true);
     assert.equal(isChargeableTender({ ...record, tenderTitle: null }), false);
     assert.equal(isChargeableTender({ ...record, tenderId: '' }), false);
+});
+
+test('extracts the GeM CSRF token from script and hidden-input page shapes', () => {
+    const token = '0123456789abcdef0123456789abcdef';
+
+    assert.equal(extractCsrfToken(`<script>'csrf_bd_gem_nk': '${token}'</script>`), token);
+    assert.equal(extractCsrfToken(`<input type="hidden" name="csrf_bd_gem_nk" value="${token}">`), token);
+    assert.equal(extractCsrfToken(`<input value="${token}" name="csrf_bd_gem_nk" type="hidden">`), token);
+    assert.equal(extractCsrfToken('<html>No token</html>'), null);
+});
+
+test('maps wrapped GeM listing values into a chargeable tender record', () => {
+    const record = mapGemDoc({
+        b_id: [7605079],
+        b_bid_number: ['GEM/2026/B/7605079'],
+        bd_category_name: ['Laptop Computers'],
+        ba_official_details_minName: ['Ministry of Education'],
+        ba_official_details_deptName: ['Department of Higher Education'],
+        final_end_date_sort: ['2026-07-31T12:00:00Z'],
+        b_bid_type: [1],
+        b_buyer_status: [1],
+    }, 'laptop');
+
+    assert.equal(record.tenderId, 'GEM/2026/B/7605079');
+    assert.equal(record.tenderTitle, 'Laptop Computers');
+    assert.equal(record.department, 'Department of Higher Education');
+    assert.equal(record.closingDate, '2026-07-31T12:00:00.000Z');
+    assert.equal(record.tenderUrl, 'https://bidplus.gem.gov.in/showbidDocument/7605079');
+    assert.equal(isChargeableTender(record), true);
 });

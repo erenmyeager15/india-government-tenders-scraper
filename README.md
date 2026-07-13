@@ -4,9 +4,9 @@ Scrape public Indian government tender opportunities for procurement research, b
 
 PDF enrichment fills practical opportunity fields such as publishing date, bid opening date, bid validity, organization, ministry, department, state/location hints, EMD amount, and eligibility summary. Export to JSON, CSV, Excel, or HTML, or pull via the Apify API. No login and no API key are required for the public GeM flow.
 
-The default run is intentionally small: 1 `laptop` tender from GeM. The Actor accepts up to 5 keywords in one run, supports up to 50 matching tenders per keyword, and saves clean records to the Apify Dataset. Filters are applied after enrichment where the public source exposes the field, so state and published-date filters use recovered GeM detail data instead of rough listing text.
+The default run is intentionally small: 1 `laptop` tender from GeM. The Actor accepts up to 5 keywords in one run, supports up to 50 matching tenders per keyword, and saves clean records to the Apify Dataset. Filters are applied after enrichment where the public source exposes the field, so state and published-date filters use recovered GeM detail data instead of rough listing text. A 10-page-per-keyword ceiling prevents restrictive filters from turning into unbounded scans.
 
-GeM currently requires Residential India proxy routing for reliable public access. The Actor handles this internally so users do not need to configure proxies manually.
+GeM currently requires Residential India proxy routing for reliable public access. The Actor handles this internally, keeps the CSRF flow on one sticky session, and permits one capped fresh-session retry when GeM or a residential route becomes stale. Users do not need to configure proxies manually.
 
 CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before tender results are exposed. When CPPP is selected, the Actor detects the gate, skips CPPP without placeholder rows, and does not charge `tender-scraped` events for unavailable records. This keeps the dataset honest while preserving the schema for future CPPP access improvements.
 
