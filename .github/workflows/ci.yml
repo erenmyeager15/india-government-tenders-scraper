@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 20
+          cache: npm
+
+      - run: npm ci
+      - run: npm test
+      - run: npm run typecheck
+      - run: npm run audit:prod
+      - name: Validate Actor JSON files
+        run: node -e "for (const path of ['.actor/actor.json', '.actor/output_schema.json', 'INPUT_SCHEMA.json', 'input.json', 'test_input.json', 'tsconfig.json']) JSON.parse(require('fs').readFileSync(path, 'utf8'))"
