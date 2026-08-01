@@ -4,7 +4,7 @@
     "title": "India Government Tenders Scraper - GeM Listings",
     "description": "Scrape public Indian government tender listings from GeM bid listings, with guarded CPPP handling when the public listing is CAPTCHA-gated.",
     "version": "1.0",
-    "categories": ["BUSINESS", "AUTOMATION", "OTHER"],
+  "categories": ["BUSINESS", "AUTOMATION"],
     "categoriesVersion": "1.0.0",
     "dockerfile": "Dockerfile",
     "input": "../INPUT_SCHEMA.json",
