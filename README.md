@@ -99,6 +99,7 @@ Current CPPP public pages are CAPTCHA-gated and are skipped unless a non-CAPTCHA
 ## Notes
 
 - GeM tender value, tender document fee, and corrigendum count are left `null` when they are not exposed by the public listing or bid PDF.
+- Each GeM keyword gets an independent fresh-session recovery. If one keyword or later page remains unavailable, the Actor preserves clean tenders from other successful pages instead of failing the whole partial run. A run still fails when GeM never returns any readable search page.
 - GeM state/location is inferred from public bid PDF text when available. Records without a matched state are excluded only when a state filter is provided.
 - No placeholder rows are pushed.
 - Dataset saving and `tender-scraped` charging use one atomic operation. When a user's maximum charge is reached, the Actor stops before making more tender or PDF-enrichment requests.

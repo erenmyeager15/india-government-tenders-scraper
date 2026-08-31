@@ -150,12 +150,14 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
     };
 
     let session = await openFreshSession('initial');
-    let sessionRefreshes = 0;
+    let successfulGemPages = 0;
+    let lastGemPageError: unknown;
 
     try {
         for (const keyword of input.keywords) {
             let page = 1;
             let scrapedForKeyword = 0;
+            let sessionRefreshes = 0;
 
             while (scrapedForKeyword < input.maxResults) {
                 await randomDelay();
@@ -163,15 +165,30 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
                 try {
                     data = await fetchGemPage(session, input.status, keyword, page);
                 } catch (error) {
-                    if (sessionRefreshes >= MAX_GEM_SESSION_REFRESHES) throw error;
+                    lastGemPageError = error;
+                    if (sessionRefreshes >= MAX_GEM_SESSION_REFRESHES) {
+                        log.warning(
+                            `Skipping the remaining GeM pages for keyword="${keyword}" after repeated page failures: ${errorMessage(error)}`,
+                        );
+                        break;
+                    }
                     sessionRefreshes += 1;
                     log.warning(
                         `GeM search session failed for keyword="${keyword}" page=${page}; opening one fresh India Residential session: ${errorMessage(error)}`,
                     );
                     await closeGemSession(session);
-                    session = await openFreshSession(`refresh-${sessionRefreshes}`);
-                    data = await fetchGemPage(session, input.status, keyword, page);
+                    try {
+                        session = await openFreshSession(`keyword-${keyword}-refresh-${sessionRefreshes}`);
+                        data = await fetchGemPage(session, input.status, keyword, page);
+                    } catch (refreshError) {
+                        lastGemPageError = refreshError;
+                        log.warning(
+                            `Skipping the remaining GeM pages for keyword="${keyword}" because its fresh session also failed: ${errorMessage(refreshError)}`,
+                        );
+                        break;
+                    }
                 }
+                successfulGemPages += 1;
 
                 const docs = data.response?.response?.docs ?? [];
                 const total = data.response?.response?.numFound ?? docs.length;
@@ -197,6 +214,10 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
                 }
                 page += 1;
             }
+        }
+
+        if (successfulGemPages === 0 && lastGemPageError) {
+            throw new Error(`GeM did not return a readable search page after retries: ${errorMessage(lastGemPageError)}`);
         }
     } finally {
         await closeGemSession(session);
