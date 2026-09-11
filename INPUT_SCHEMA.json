@@ -1,13 +1,13 @@
 {
     "title": "India Government Tenders Scraper",
-    "description": "Low-cost sample: collect 1 public GeM tender for the keyword laptop. GeM uses Residential India routing internally; CPPP is guarded because the public listing is CAPTCHA-gated.",
+    "description": "Low-cost sample: collect 1 public GeM tender for laptop. GeM uses Residential India routing internally. CPPP extraction is not implemented; legacy CPPP inputs remain accepted but cannot return CPPP records.",
     "type": "object",
     "schemaVersion": 1,
     "required": ["source", "keywords"],
     "properties": {
         "source": {
             "title": "Tender Source",
-            "description": "Choose GeM, CPPP, or both. GeM is the reliable default. CPPP is skipped without tender-scraped charges when its public listing shows CAPTCHA.",
+            "description": "Use gem: the supported source. Legacy cppp returns no records; both can return only GeM records. CPPP extraction is not implemented, even without CAPTCHA. Run-start and applicable platform usage charges can still apply.",
             "type": "string",
             "enum": ["gem", "cppp", "both"],
             "default": "gem",

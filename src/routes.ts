@@ -425,6 +425,7 @@ function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
 }
 
 async function scrapeCpppGuarded(input: NormalizedInput): Promise<TenderRecord[]> {
+    log.warning('CPPP extraction is not implemented in this version, even without CAPTCHA. This legacy source selection cannot return CPPP records. Use source: gem for supported extraction. Run-start and applicable platform usage charges can still apply.');
     const response = await fetchWithRetries(CPPP_ACTIVE_URL, {
         headers: {
             'user-agent': USER_AGENT,

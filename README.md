@@ -1,4 +1,4 @@
-# India Government Tenders Scraper - GeM & CPPP
+# India Government Tenders Scraper - GeM Listings
 
 Scrape public Indian government tender opportunities for procurement research, bid monitoring, and public-sector demand tracking. The Actor searches the live GeM bid listing endpoint by keyword, deduplicates tenders by ID, then enriches each GeM result from its public bid PDF when available.
 
@@ -8,7 +8,7 @@ The default run is intentionally small: 1 `laptop` tender from GeM. The Actor ac
 
 GeM currently requires Residential India proxy routing for reliable public access. The Actor handles this internally, keeps the CSRF flow on one sticky session, and permits one capped fresh-session retry when GeM or a residential route becomes stale. Users do not need to configure proxies manually.
 
-CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before tender results are exposed. When CPPP is selected, the Actor detects the gate, skips CPPP without placeholder rows, and does not charge `tender-scraped` events for unavailable records. This keeps the dataset honest while preserving the schema for future CPPP access improvements.
+CPPP extraction is not implemented in this version, even when a page has no CAPTCHA. Use `source: "gem"`. The legacy `cppp` and `both` inputs remain accepted for compatibility, but cannot produce CPPP records. No placeholder CPPP rows or `tender-scraped` events are generated for them; run-start and applicable platform usage charges can still apply.
 
 ## Use Cases
 
@@ -39,7 +39,7 @@ CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before
 
 | Field | Type | Description |
 | --- | --- | --- |
-| `source` | string | `gem`, `cppp`, or `both`. GeM is the reliable default |
+| `source` | string | Use `gem` (supported). Legacy `cppp` produces no records; `both` can return only GeM records. CPPP extraction is unavailable |
 | `keywords` | string[] | Search keywords, processed sequentially. Up to 5 keywords |
 | `department` | string | Optional ministry, department, or organization text filter |
 | `state` | string | Optional state filter from enriched GeM detail PDFs |
@@ -85,7 +85,7 @@ CPPP support is guarded. The current public CPPP listing is CAPTCHA-gated before
 
 ## CPPP Behavior
 
-Current CPPP public pages are CAPTCHA-gated and are skipped unless a non-CAPTCHA source becomes available. The Actor does not bypass CAPTCHA and does not push placeholder CPPP rows.
+CPPP extraction is unavailable, not merely blocked by CAPTCHA: this version has no CPPP result parser. Legacy selections may probe the public CPPP page, but never extract CPPP tenders. A probe can also fail if the source is unavailable. Select `gem` to avoid this unsupported path. The Actor does not bypass CAPTCHA or push placeholder CPPP rows. CPPP would require a future implementation and verification before it can be advertised as supported.
 
 ## Pricing
 
