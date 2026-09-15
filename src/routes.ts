@@ -13,10 +13,10 @@ const GEM_BASE_URL = 'https://bidplus.gem.gov.in';
 const CPPP_ACTIVE_URL = 'https://eprocure.gov.in/eprocure/app?page=FrontEndLatestActiveTenders&service=page';
 const USER_AGENT =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0 Safari/537.36';
-const REQUEST_TIMEOUT_MS = 25000;
-const MAX_RETRIES = 2;
-const MAX_GEM_SESSION_ATTEMPTS = 2;
-const MAX_GEM_SESSION_REFRESHES = 1;
+const REQUEST_TIMEOUT_MS = 35000;
+const MAX_RETRIES = 3;
+const MAX_GEM_SESSION_ATTEMPTS = 4;
+const MAX_GEM_SESSION_REFRESHES = 2;
 const MAX_GEM_PAGES_PER_KEYWORD = 10;
 const DEFAULT_MAX_RESULTS_PER_KEYWORD = 1;
 const MAX_RESULTS_PER_KEYWORD = 50;
@@ -122,13 +122,7 @@ export function isChargeableTender(record: TenderRecord): boolean {
 }
 
 async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): Promise<boolean> {
-    const proxyConfiguration = await Actor.createProxyConfiguration({
-        groups: ['RESIDENTIAL'],
-        countryCode: 'IN',
-    });
-    if (!proxyConfiguration) {
-        throw new Error('GeM requires Apify Residential Proxy with country India, but proxy configuration was not created.');
-    }
+    const proxyConfiguration = await createGemProxyConfiguration();
 
     log.info('GeM network mode: Apify Residential Proxy, country=IN');
     const openFreshSession = async (reason: string): Promise<GemSession> => {
@@ -144,12 +138,17 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
                 log.warning(
                     `GeM ${reason} session attempt ${attempt}/${MAX_GEM_SESSION_ATTEMPTS} failed: ${errorMessage(error)}`,
                 );
+                // Each attempt uses a new proxy session ID, so a blocked or dead exit IP is
+                // replaced on retry. Back off so GeM is not hit again immediately.
+                if (attempt < MAX_GEM_SESSION_ATTEMPTS) await randomDelay(2000 * attempt, 4000 * attempt);
             }
         }
         throw new Error(`GeM Residential India proxy session failed: ${errorMessage(lastError)}`);
     };
 
-    let session = await openFreshSession('initial');
+    // The session is opened lazily per keyword. A bad first exit IP then costs one keyword's
+    // attempts instead of killing the whole run before a single page is read.
+    let session: GemSession | null = null;
     let successfulGemPages = 0;
     let lastGemPageError: unknown;
 
@@ -159,11 +158,24 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
             let scrapedForKeyword = 0;
             let sessionRefreshes = 0;
 
+            if (!session) {
+                try {
+                    session = await openFreshSession(`keyword-${keyword}-initial`);
+                } catch (error) {
+                    lastGemPageError = error;
+                    log.warning(`Could not open a GeM India Residential session for keyword="${keyword}": ${errorMessage(error)}`);
+                    continue;
+                }
+            }
+
             while (scrapedForKeyword < input.maxResults) {
                 await randomDelay();
+                let pageSession = session;
+                if (!pageSession) break;
+
                 let data: GemSearchResponse;
                 try {
-                    data = await fetchGemPage(session, input.status, keyword, page);
+                    data = await fetchGemPage(pageSession, input.status, keyword, page);
                 } catch (error) {
                     lastGemPageError = error;
                     if (sessionRefreshes >= MAX_GEM_SESSION_REFRESHES) {
@@ -176,10 +188,12 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
                     log.warning(
                         `GeM search session failed for keyword="${keyword}" page=${page}; opening one fresh India Residential session: ${errorMessage(error)}`,
                     );
-                    await closeGemSession(session);
+                    await closeGemSession(pageSession);
+                    session = null;
                     try {
                         session = await openFreshSession(`keyword-${keyword}-refresh-${sessionRefreshes}`);
-                        data = await fetchGemPage(session, input.status, keyword, page);
+                        pageSession = session;
+                        data = await fetchGemPage(pageSession, input.status, keyword, page);
                     } catch (refreshError) {
                         lastGemPageError = refreshError;
                         log.warning(
@@ -198,7 +212,7 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
 
                 for (const doc of docs) {
                     if (scrapedForKeyword >= input.maxResults) break;
-                    const record = await enrichGemRecord(mapGemDoc(doc, keyword), session);
+                    const record = await enrichGemRecord(mapGemDoc(doc, keyword), pageSession);
                     if (!passesClientFilters(record, input)) continue;
                     if (!(await consume(record))) return true;
                     scrapedForKeyword += 1;
@@ -220,10 +234,32 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
             throw new Error(`GeM did not return a readable search page after retries: ${errorMessage(lastGemPageError)}`);
         }
     } finally {
-        await closeGemSession(session);
+        if (session) await closeGemSession(session);
     }
 
     return false;
+}
+
+async function createGemProxyConfiguration(): Promise<NonNullable<Awaited<ReturnType<typeof Actor.createProxyConfiguration>>>> {
+    // GeM (bidplus.gem.gov.in) refuses datacenter proxy exit IPs, so Residential India is the
+    // only working route. Surface an actionable message instead of a raw SDK error when the
+    // account running the Actor cannot use the Residential group.
+    try {
+        const proxyConfiguration = await Actor.createProxyConfiguration({
+            groups: ['RESIDENTIAL'],
+            countryCode: 'IN',
+        });
+        if (!proxyConfiguration) {
+            throw new Error('proxy configuration was not created');
+        }
+        return proxyConfiguration;
+    } catch (error) {
+        throw new Error(
+            'GeM only accepts Apify Residential Proxy traffic from India, and this run could not open a Residential proxy configuration. '
+            + 'Enable Residential proxy access for the account running this Actor, then try again. '
+            + `Original error: ${errorMessage(error)}`,
+        );
+    }
 }
 
 async function enrichGemRecord(record: TenderRecord, session: GemSession): Promise<TenderRecord> {
@@ -426,15 +462,25 @@ function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
 
 async function scrapeCpppGuarded(input: NormalizedInput): Promise<TenderRecord[]> {
     log.warning('CPPP extraction is not implemented in this version, even without CAPTCHA. This legacy source selection cannot return CPPP records. Use source: gem for supported extraction. Run-start and applicable platform usage charges can still apply.');
-    const response = await fetchWithRetries(CPPP_ACTIVE_URL, {
-        headers: {
-            'user-agent': USER_AGENT,
-            accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-            'accept-language': 'en-US,en;q=0.9',
-            referer: 'https://eprocure.gov.in/eprocure/app',
-        },
-    });
-    const html = await response.text();
+
+    let html: string;
+    try {
+        const response = await fetchWithRetries(CPPP_ACTIVE_URL, {
+            headers: {
+                'user-agent': USER_AGENT,
+                accept: 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+                'accept-language': 'en-US,en;q=0.9',
+                referer: 'https://eprocure.gov.in/eprocure/app',
+            },
+        });
+        html = await response.text();
+    } catch (error) {
+        // CPPP cannot return records in this version anyway, so an unreachable eprocure.gov.in
+        // must never fail a run that already collected GeM tenders.
+        log.warning(`CPPP listing page was unreachable and was skipped without failing the run: ${errorMessage(error)}`);
+        return [];
+    }
+
     if (/captcha/i.test(html)) {
         log.warning(
             'CPPP public tender listing is CAPTCHA-gated. Skipping CPPP without pushing placeholder rows or charging tender-scraped events.',
@@ -460,7 +506,7 @@ async function fetchWithRetries(url: string, init: FetchInitWithDispatcher = {})
         } catch (error) {
             lastError = error;
             log.warning(`Fetch attempt ${attempt}/${MAX_RETRIES} failed for ${url}: ${errorMessage(error)}`);
-            if (attempt < MAX_RETRIES) await randomDelay(1000, 3000);
+            if (attempt < MAX_RETRIES) await randomDelay(1000 * attempt, 3000 * attempt);
         } finally {
             clearTimeout(timeout);
         }
