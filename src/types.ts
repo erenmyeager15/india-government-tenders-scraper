@@ -12,6 +12,8 @@ export interface ActorInput {
     dateTo?: string;
     status?: TenderStatus;
     maxResults?: number;
+    /** Enables persistent comparison when a saved watchlist name is provided. */
+    watchlistName?: string;
     proxyConfiguration?: {
         useApifyProxy?: boolean;
         apifyProxyGroups?: string[];
@@ -30,6 +32,7 @@ export interface NormalizedInput {
     dateTo: string | null;
     status: TenderStatus;
     maxResults: number;
+    watchlistName: string | null;
     proxyConfiguration?: ActorInput['proxyConfiguration'];
 }
 
@@ -61,4 +64,23 @@ export interface TenderRecord {
     tenderUrl: string | null;
     corrigendumCount: number | null;
     scrapedAt: string;
+}
+
+export interface FieldEvidence {
+    source: 'gem_listing' | 'gem_bid_pdf';
+    url: string;
+    excerpt?: string;
+}
+
+export interface GemObservation {
+    record: TenderRecord;
+    evidence: Partial<Record<keyof TenderRecord, FieldEvidence>>;
+    pdfStatus: 'read' | 'failed' | 'unavailable';
+}
+
+export interface GemScanDiagnostics {
+    complete: boolean;
+    successfulPages: number;
+    issues: Array<{ keyword: string; reason: 'search_failed' | 'pdf_failed' | 'page_limit' | 'spending_limit' | 'invalid_record' }>;
+    keywords: Array<{ keyword: string; coverage: 'exhausted' | 'result_limit' | 'incomplete'; pages: number }>;
 }

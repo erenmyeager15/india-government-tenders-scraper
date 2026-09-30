@@ -2,7 +2,7 @@ import { Actor, log } from 'apify';
 import { createRequire } from 'node:module';
 import type pdfParseType from 'pdf-parse';
 import { ProxyAgent } from 'undici';
-import { ActorInput, NormalizedInput, TenderRecord, TenderStatus } from './types.js';
+import { ActorInput, FieldEvidence, GemObservation, GemScanDiagnostics, NormalizedInput, TenderRecord, TenderStatus } from './types.js';
 
 type JsonObject = Record<string, unknown>;
 
@@ -25,13 +25,13 @@ const DEFAULT_KEYWORDS = ['laptop'];
 const VALID_SOURCES = new Set(['gem', 'cppp', 'both']);
 const VALID_STATUSES = new Set(['active', 'closed', 'all']);
 
-interface GemSession {
+export interface GemSession {
     csrfToken: string;
     cookie: string;
     dispatcher?: ProxyAgent;
 }
 
-interface GemSearchResponse {
+export interface GemSearchResponse {
     status?: number;
     code?: number;
     message?: string;
@@ -44,7 +44,19 @@ interface GemSearchResponse {
     };
 }
 
-type TenderRecordHandler = (record: TenderRecord) => Promise<boolean>;
+type TenderRecordHandler = (record: TenderRecord, observation?: GemObservation) => Promise<boolean>;
+
+export interface GemScanRuntime {
+    openSession(reason: string): Promise<GemSession>;
+    closeSession(session: GemSession): Promise<void>;
+    fetchPage(session: GemSession, status: TenderStatus, keyword: string, page: number): Promise<GemSearchResponse>;
+    enrich(record: TenderRecord, session: GemSession): Promise<GemObservation>;
+    delay(): Promise<void>;
+}
+
+export function createGemScanDiagnostics(): GemScanDiagnostics {
+    return { complete: true, successfulPages: 0, issues: [], keywords: [] };
+}
 
 export function normalizeInput(input: ActorInput | null): NormalizedInput {
     const requestedKeywords = Array.isArray(input?.keywords) ? input.keywords : DEFAULT_KEYWORDS;
@@ -58,6 +70,11 @@ export function normalizeInput(input: ActorInput | null): NormalizedInput {
 
     const source = VALID_SOURCES.has(String(input?.source)) ? input?.source as NormalizedInput['source'] : 'gem';
     const status = VALID_STATUSES.has(String(input?.status)) ? input?.status as TenderStatus : 'active';
+    const watchlistName = cleanString(input?.watchlistName);
+    if (watchlistName && !/^[a-zA-Z0-9][a-zA-Z0-9_-]{0,49}$/.test(watchlistName)) {
+        throw new Error('watchlistName must contain 1–50 letters, numbers, underscores or hyphens, starting with a letter or number.');
+    }
+    if (watchlistName && source === 'cppp') throw new Error('Saved watchlists support GeM only. Use source: gem.');
     const minValue = nonNegativeNumberOrNull(input?.minValue);
     const maxValue = nonNegativeNumberOrNull(input?.maxValue);
     if (minValue !== null && maxValue !== null && minValue > maxValue) {
@@ -81,6 +98,7 @@ export function normalizeInput(input: ActorInput | null): NormalizedInput {
         dateTo,
         status,
         maxResults: normalizeMaxResults(input?.maxResults),
+        watchlistName,
         proxyConfiguration: input?.proxyConfiguration,
     };
 }
@@ -88,23 +106,27 @@ export function normalizeInput(input: ActorInput | null): NormalizedInput {
 export async function scrapeTenders(
     rawInput: ActorInput | null,
     onRecord?: TenderRecordHandler,
+    options: { diagnostics?: GemScanDiagnostics; gemRuntime?: GemScanRuntime } = {},
 ): Promise<TenderRecord[]> {
     const input = normalizeInput(rawInput);
     const records: TenderRecord[] = [];
     const seen = new Set<string>();
-    const consume = async (record: TenderRecord): Promise<boolean> => {
+    const consume = async (record: TenderRecord, observation?: GemObservation): Promise<boolean> => {
         if (!isChargeableTender(record)) return true;
         const key = `${record.source}:${record.tenderId}`;
         if (seen.has(key)) return true;
 
-        if (onRecord && !(await onRecord(record))) return false;
+        if (onRecord && !(await onRecord(record, observation))) return false;
         seen.add(key);
         records.push(record);
         return true;
     };
 
     if (input.source === 'gem' || input.source === 'both') {
-        const stopped = await scrapeGem(input, consume);
+        const diagnostics = options.diagnostics ?? createGemScanDiagnostics();
+        const stopped = options.gemRuntime
+            ? await scanGemKeywords(input, consume, options.gemRuntime, diagnostics)
+            : await scrapeGem(input, consume, diagnostics);
         if (stopped) return records;
     }
 
@@ -118,10 +140,10 @@ export async function scrapeTenders(
 }
 
 export function isChargeableTender(record: TenderRecord): boolean {
-    return Boolean(record.tenderId && record.tenderTitle);
+    return Boolean(record.tenderId && record.tenderId !== 'unknown' && record.tenderTitle);
 }
 
-async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): Promise<boolean> {
+async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler, diagnostics: GemScanDiagnostics): Promise<boolean> {
     const proxyConfiguration = await createGemProxyConfiguration();
 
     log.info('GeM network mode: Apify Residential Proxy, country=IN');
@@ -146,84 +168,141 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
         throw new Error(`GeM Residential India proxy session failed: ${errorMessage(lastError)}`);
     };
 
+    return scanGemKeywords(input, consume, {
+        openSession: openFreshSession,
+        closeSession: closeGemSession,
+        fetchPage: fetchGemPage,
+        enrich: enrichGemRecord,
+        delay: randomDelay,
+    }, diagnostics);
+}
+
+export async function scanGemKeywords(
+    input: NormalizedInput,
+    consume: TenderRecordHandler,
+    runtime: GemScanRuntime,
+    diagnostics: GemScanDiagnostics,
+): Promise<boolean> {
+    const issue = (keyword: string, reason: GemScanDiagnostics['issues'][number]['reason']) => {
+        diagnostics.complete = false;
+        if (!diagnostics.issues.some((item) => item.keyword === keyword && item.reason === reason)) diagnostics.issues.push({ keyword, reason });
+    };
     // The session is opened lazily per keyword. A bad first exit IP then costs one keyword's
     // attempts instead of killing the whole run before a single page is read.
     let session: GemSession | null = null;
     let successfulGemPages = 0;
     let lastGemPageError: unknown;
+    const observationsById = new Map<string, GemObservation>();
+    const readPage = async (session: GemSession, keyword: string, page: number) => {
+        const data = await runtime.fetchPage(session, input.status, keyword, page);
+        validateGemSearchResponse(data);
+        return data;
+    };
 
     try {
         for (const keyword of input.keywords) {
             let page = 1;
             let scrapedForKeyword = 0;
             let sessionRefreshes = 0;
+            const coverage: GemScanDiagnostics['keywords'][number] = { keyword, coverage: 'incomplete', pages: 0 };
+            diagnostics.keywords.push(coverage);
 
             if (!session) {
                 try {
-                    session = await openFreshSession(`keyword-${keyword}-initial`);
+                    session = await runtime.openSession(`keyword-${keyword}-initial`);
                 } catch (error) {
                     lastGemPageError = error;
                     log.warning(`Could not open a GeM India Residential session for keyword="${keyword}": ${errorMessage(error)}`);
+                    issue(keyword, 'search_failed');
                     continue;
                 }
             }
 
             while (scrapedForKeyword < input.maxResults) {
-                await randomDelay();
+                await runtime.delay();
                 let pageSession = session;
                 if (!pageSession) break;
 
                 let data: GemSearchResponse;
                 try {
-                    data = await fetchGemPage(pageSession, input.status, keyword, page);
+                    data = await readPage(pageSession, keyword, page);
                 } catch (error) {
                     lastGemPageError = error;
                     if (sessionRefreshes >= MAX_GEM_SESSION_REFRESHES) {
                         log.warning(
                             `Skipping the remaining GeM pages for keyword="${keyword}" after repeated page failures: ${errorMessage(error)}`,
                         );
+                        issue(keyword, 'search_failed');
                         break;
                     }
                     sessionRefreshes += 1;
                     log.warning(
                         `GeM search session failed for keyword="${keyword}" page=${page}; opening one fresh India Residential session: ${errorMessage(error)}`,
                     );
-                    await closeGemSession(pageSession);
+                    await runtime.closeSession(pageSession);
                     session = null;
                     try {
-                        session = await openFreshSession(`keyword-${keyword}-refresh-${sessionRefreshes}`);
+                        session = await runtime.openSession(`keyword-${keyword}-refresh-${sessionRefreshes}`);
                         pageSession = session;
-                        data = await fetchGemPage(pageSession, input.status, keyword, page);
+                        data = await readPage(pageSession, keyword, page);
                     } catch (refreshError) {
                         lastGemPageError = refreshError;
                         log.warning(
                             `Skipping the remaining GeM pages for keyword="${keyword}" because its fresh session also failed: ${errorMessage(refreshError)}`,
                         );
+                        issue(keyword, 'search_failed');
                         break;
                     }
                 }
                 successfulGemPages += 1;
+                diagnostics.successfulPages += 1;
+                coverage.pages += 1;
 
                 const docs = data.response?.response?.docs ?? [];
                 const total = data.response?.response?.numFound ?? docs.length;
 
                 log.info(`GeM keyword="${keyword}" page=${page}: ${docs.length} docs, total=${total}`);
-                if (docs.length === 0) break;
+                if (docs.length === 0) {
+                    coverage.coverage = 'exhausted';
+                    break;
+                }
 
                 for (const doc of docs) {
                     if (scrapedForKeyword >= input.maxResults) break;
-                    const record = await enrichGemRecord(mapGemDoc(doc, keyword), pageSession);
+                    const mapped = mapGemDoc(doc, keyword);
+                    if (!isChargeableTender(mapped)) {
+                        issue(keyword, 'invalid_record');
+                        continue;
+                    }
+                    const cached = observationsById.get(mapped.tenderId);
+                    const observation = cached
+                        ? { ...cached, record: { ...cached.record, keyword } }
+                        : await runtime.enrich(mapped, pageSession);
+                    if (observation.pdfStatus === 'read') observationsById.set(mapped.tenderId, observation);
+                    if (observation.pdfStatus !== 'read') issue(keyword, 'pdf_failed');
+                    const record = observation.record;
                     if (!passesClientFilters(record, input)) continue;
-                    if (!(await consume(record))) return true;
+                    if (!(await consume(record, observation))) {
+                        issue(keyword, 'spending_limit');
+                        return true;
+                    }
                     scrapedForKeyword += 1;
                 }
 
                 const start = data.response?.response?.start ?? (page - 1) * docs.length;
-                if (start + docs.length >= total) break;
+                if (scrapedForKeyword >= input.maxResults) {
+                    coverage.coverage = 'result_limit';
+                    break;
+                }
+                if (start + docs.length >= total) {
+                    coverage.coverage = 'exhausted';
+                    break;
+                }
                 if (page >= MAX_GEM_PAGES_PER_KEYWORD) {
                     log.warning(
                         `Reached the ${MAX_GEM_PAGES_PER_KEYWORD}-page safety cap for keyword="${keyword}" after saving ${scrapedForKeyword} records. Narrow the filters or use another keyword for more results.`,
                     );
+                    issue(keyword, 'page_limit');
                     break;
                 }
                 page += 1;
@@ -234,7 +313,7 @@ async function scrapeGem(input: NormalizedInput, consume: TenderRecordHandler): 
             throw new Error(`GeM did not return a readable search page after retries: ${errorMessage(lastGemPageError)}`);
         }
     } finally {
-        if (session) await closeGemSession(session);
+        if (session) await runtime.closeSession(session);
     }
 
     return false;
@@ -262,8 +341,9 @@ async function createGemProxyConfiguration(): Promise<NonNullable<Awaited<Return
     }
 }
 
-async function enrichGemRecord(record: TenderRecord, session: GemSession): Promise<TenderRecord> {
-    if (!record.tenderUrl) return record;
+async function enrichGemRecord(record: TenderRecord, session: GemSession): Promise<GemObservation> {
+    const evidence = gemListingEvidence(record);
+    if (!record.tenderUrl) return { record, evidence, pdfStatus: 'unavailable' };
 
     try {
         await randomDelay(600, 1600);
@@ -278,10 +358,10 @@ async function enrichGemRecord(record: TenderRecord, session: GemSession): Promi
         });
         const bytes = Buffer.from(await response.arrayBuffer());
         const result = await pdfParse(bytes);
-        return mergeGemPdfDetails(record, result.text);
+        return { record: mergeGemPdfDetails(record, result.text, evidence), evidence, pdfStatus: 'read' };
     } catch (error) {
         log.warning(`Could not enrich GeM PDF for ${record.tenderId}: ${errorMessage(error)}`);
-        return record;
+        return { record, evidence, pdfStatus: 'failed' };
     }
 }
 
@@ -358,7 +438,19 @@ async function fetchGemPage(session: GemSession, status: TenderStatus, keyword: 
         const displayedCode = Number.isFinite(responseCode) ? responseCode : 'unknown';
         throw new Error(`GeM returned code ${displayedCode}: ${data.message ?? text.slice(0, 160)}`);
     }
+    validateGemSearchResponse(data);
     return data;
+}
+
+export function validateGemSearchResponse(data: GemSearchResponse): void {
+    const page = data.response?.response;
+    if (!page || !Array.isArray(page.docs) || !page.docs.every((doc) => doc !== null && typeof doc === 'object' && !Array.isArray(doc))
+        || !Number.isInteger(page.numFound) || Number(page.numFound) < 0
+        || (page.start !== undefined && (!Number.isInteger(page.start) || page.start < 0))
+        || page.docs.length > Number(page.numFound) - Number(page.start ?? 0)
+        || (page.docs.length === 0 && Number(page.numFound) > Number(page.start ?? 0))) {
+        throw new Error('GeM returned an incomplete or invalid search-result shape.');
+    }
 }
 
 function buildGemFilter(status: TenderStatus): JsonObject {
@@ -419,7 +511,16 @@ export function mapGemDoc(doc: JsonObject, keyword: string): TenderRecord {
     };
 }
 
-function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
+export function gemListingEvidence(record: TenderRecord): GemObservation['evidence'] {
+    const evidence: GemObservation['evidence'] = {};
+    // The Dataset's listing organization is a department fallback, not independently
+    // observed organization evidence. Only a parsed PDF can monitor that field.
+    const fields: Array<keyof TenderRecord> = ['tenderTitle', 'tenderReferenceNumber', 'department', 'ministry', 'category', 'tenderType', 'bidSubmissionStartDate', 'bidSubmissionEndDate', 'closingDate', 'tenderStatus', 'tenderUrl'];
+    for (const field of fields) if (record[field] !== null) evidence[field] = { source: 'gem_listing', url: `${GEM_BASE_URL}/all-bids` };
+    return evidence;
+}
+
+export function mergeGemPdfDetails(record: TenderRecord, text: string, evidence?: GemObservation['evidence']): TenderRecord {
     const normalizedText = normalizePdfText(text);
     const openingDate = parseGemDateTime(extractByRegex(normalizedText, /Bid Opening\s+Date\/Time\s+([0-9-]{10}\s+[0-9:]{5,8})/i));
     const publishedDate = parseGemDateTime(extractByRegex(normalizedText, /Dated:\s*([0-9-]{10})/i));
@@ -441,6 +542,27 @@ function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
     const emdAmount = parseAmount(extractByRegex(normalizedText, /EMD Amount\s*([0-9,]+(?:\.\d+)?)/i));
     const eligibilityCriteriaSummary = buildEligibilitySummary(normalizedText);
     const state = inferIndianState(normalizedText);
+    const pdfEndDate = parseGemDateTime(extractByRegex(normalizedText, /Bid End Date\/Time\s+([0-9-]{10}\s+[0-9:]{5,8})/i));
+    // Only explicit count labels are count evidence. Generic corrigendum mentions or
+    // "Corrigendum No. 2" do not establish the total number of amendments.
+    const corrigendumMatch = normalizedText.match(/^(?:Corrigendum Count|Number of Corrigenda)\s*[:=-]?\s*(\d{1,5})\s*$/im);
+    const corrigendumCount = corrigendumMatch ? Number(corrigendumMatch[1]) : null;
+    if (evidence && record.tenderUrl) {
+        const pdfValues: Partial<TenderRecord> = {
+            organization, department,
+            ministry: ministryOrState && !isIndianState(ministryOrState) ? ministryOrState : null,
+            tenderOpenDate: openingDate, publishedDate, bidValidity, state,
+            location: state, eligibilityCriteriaSummary, emdAmount, corrigendumCount,
+            ...(!record.bidSubmissionEndDate ? { bidSubmissionEndDate: pdfEndDate } : {}),
+            ...(!record.category ? { category: pdfCategory, tenderTitle: pdfCategory } : {}),
+        };
+        for (const [field, value] of Object.entries(pdfValues)) {
+            if (value !== null) evidence[field as keyof TenderRecord] = {
+                source: 'gem_bid_pdf', url: record.tenderUrl,
+                ...(field === 'corrigendumCount' ? { excerpt: corrigendumMatch![0].trim() } : {}),
+            } satisfies FieldEvidence;
+        }
+    }
 
     return {
         ...record,
@@ -449,7 +571,7 @@ function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
         ministry: ministryOrState && !isIndianState(ministryOrState) ? ministryOrState : record.ministry,
         category,
         tenderTitle: record.tenderTitle ?? category,
-        bidSubmissionEndDate: record.bidSubmissionEndDate ?? parseGemDateTime(extractByRegex(normalizedText, /Bid End Date\/Time\s+([0-9-]{10}\s+[0-9:]{5,8})/i)),
+        bidSubmissionEndDate: record.bidSubmissionEndDate ?? pdfEndDate,
         tenderOpenDate: openingDate ?? record.tenderOpenDate,
         publishedDate: publishedDate ?? record.publishedDate,
         bidValidity: bidValidity ?? record.bidValidity,
@@ -457,6 +579,7 @@ function mergeGemPdfDetails(record: TenderRecord, text: string): TenderRecord {
         location: state ?? record.location,
         eligibilityCriteriaSummary: eligibilityCriteriaSummary ?? record.eligibilityCriteriaSummary,
         emdAmount: emdAmount ?? record.emdAmount,
+        corrigendumCount: corrigendumCount ?? record.corrigendumCount,
     };
 }
 

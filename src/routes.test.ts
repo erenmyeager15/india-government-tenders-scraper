@@ -10,6 +10,7 @@ test('normalizes to the low-cost GeM default', () => {
     assert.deepEqual(input.keywords, ['laptop']);
     assert.equal(input.status, 'active');
     assert.equal(input.maxResults, 1);
+    assert.equal(input.watchlistName, null);
 });
 
 test('trims, deduplicates, and caps keywords', () => {
@@ -50,6 +51,7 @@ test('identifies chargeable tender records only when title and id exist', () => 
     assert.equal(isChargeableTender(record), true);
     assert.equal(isChargeableTender({ ...record, tenderTitle: null }), false);
     assert.equal(isChargeableTender({ ...record, tenderId: '' }), false);
+    assert.equal(isChargeableTender({ ...record, tenderId: 'unknown' }), false);
 });
 
 test('extracts the GeM CSRF token from script and hidden-input page shapes', () => {

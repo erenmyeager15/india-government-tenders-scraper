@@ -1,14 +1,20 @@
 {
   "actorOutputSchemaVersion": 1,
   "title": "India Government Tenders Output",
-  "description": "Structured Indian government tender records from GeM and supported public tender sources, including tender IDs, titles, organizations, deadlines, status, locations, eligibility summaries, EMD values, URLs, and scraped timestamps.",
+  "description": "Public GeM tender records in the Dataset, with an optional saved-watchlist comparison report. CPPP extraction is unavailable.",
   "type": "object",
   "properties": {
     "results": {
       "type": "string",
       "title": "Tender records",
-      "description": "Clean dataset items containing public Indian government tender and procurement opportunity details.",
+      "description": "All clean tenders saved in this run, including unchanged bids when a watchlist is enabled. Dataset saving and tender-scraped charging still apply to every saved tender.",
       "template": "{{links.apiDefaultDatasetUrl}}/items"
+    },
+    "changes": {
+      "type": "string",
+      "title": "GeM watchlist change summary",
+      "description": "GEM-CHANGES JSON in the run's default key-value store, available only when watchlistName is supplied. The first safe bounded result window initializes a baseline with no events. Later reports contain newly observed bids and evidenced material updates, or explain why comparison was withheld. Missing bids are never inferred to be removed or closed.",
+      "template": "{{links.apiDefaultKeyValueStoreUrl}}/records/GEM-CHANGES"
     }
   }
 }

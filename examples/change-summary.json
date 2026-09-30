@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "watchlistName": "illustrative-govt-it",
+  "scopeId": "83eb316696cd7a9daaaa5ca3a713612c2d8f4e4735e03cc4d927a94abd41a99b",
+  "scope": {
+    "source": "gem",
+    "keywords": ["laptop", "printer"],
+    "department": null,
+    "state": null,
+    "minValue": null,
+    "maxValue": null,
+    "dateFrom": null,
+    "dateTo": null,
+    "status": "active",
+    "maxResults": 10
+  },
+  "runId": "illustrative-synthetic-run-02",
+  "scanStartedAt": "2026-09-30T06:00:00.000Z",
+  "generatedAt": "2026-09-30T06:02:00.000Z",
+  "status": "compared",
+  "replayed": false,
+  "baselineCommitted": true,
+  "observedBids": 3,
+  "retainedBids": 3,
+  "unchangedBids": 1,
+  "scan": {
+    "complete": true,
+    "successfulPages": 2,
+    "issues": [],
+    "keywords": [
+      { "keyword": "laptop", "coverage": "exhausted", "pages": 1 },
+      { "keyword": "printer", "coverage": "exhausted", "pages": 1 }
+    ]
+  },
+  "changes": [
+    {
+      "eventId": "48ae05d5ca0c4b24726fc12ae4c10bee41bd9788ac7c0070a617d514b98ce2c6",
+      "type": "updated_bid",
+      "tenderId": "GEM/2026/B/9000001",
+      "tenderUrl": "https://bidplus.gem.gov.in/showbidDocument/9000001",
+      "observedAt": "2026-09-30T06:01:00.000Z",
+      "corrigendumCountChanged": false,
+      "fields": [
+        {
+          "field": "closingDate",
+          "previous": "2026-10-07T12:00:00.000Z",
+          "current": "2026-10-09T12:00:00.000Z",
+          "previousEvidence": {
+            "source": "gem_listing",
+            "url": "https://bidplus.gem.gov.in/all-bids-data"
+          },
+          "evidence": {
+            "source": "gem_listing",
+            "url": "https://bidplus.gem.gov.in/all-bids-data"
+          }
+        }
+      ]
+    },
+    {
+      "eventId": "91a7b03c0ed906c0ef3515fbf7940a2b14aacb81c99d294560830a19d5c07dba",
+      "type": "newly_observed_bid",
+      "tenderId": "GEM/2026/B/9000002",
+      "tenderUrl": "https://bidplus.gem.gov.in/showbidDocument/9000002",
+      "observedAt": "2026-09-30T06:01:30.000Z",
+      "corrigendumCountChanged": false,
+      "fields": []
+    }
+  ],
+  "retention": {
+    "days": 90,
+    "maxBidsPerScope": 500,
+    "maxScopes": 10,
+    "evictedBids": 0,
+    "evictedScopes": 0
+  }
+}

@@ -1,6 +1,6 @@
 {
     "title": "India Government Tenders Scraper",
-    "description": "Low-cost sample: collect 1 public GeM tender for laptop. GeM uses Residential India routing internally. CPPP extraction is not implemented; legacy CPPP inputs remain accepted but cannot return CPPP records.",
+    "description": "Low-cost sample: collect 1 public GeM tender for laptop. GeM uses Residential India routing internally. Optional saved watchlists compare later bounded result windows on the Apify platform; every clean tender still saves and charges each run. CPPP extraction is not implemented.",
     "type": "object",
     "schemaVersion": 1,
     "required": ["source", "keywords"],
@@ -61,7 +61,7 @@
         },
         "status": {
             "title": "Tender Status",
-            "description": "Tender status filter.",
+            "description": "Tender status filter. Current limitation: all uses the same ongoing GeM listing as active; it does not combine active and closed tenders.",
             "type": "string",
             "enum": ["active", "closed", "all"],
             "default": "active",
@@ -75,6 +75,15 @@
             "maximum": 50,
             "default": 1,
             "editor": "number"
+        },
+        "watchlistName": {
+            "title": "Saved GeM Watchlist Name (Optional)",
+            "description": "Enable persistent GeM comparison on the Apify platform by reusing this name. Use 1–50 letters, numbers, underscores or hyphens, starting with a letter or number. The first safe result window initializes a baseline; later runs publish GEM-CHANGES for newly observed bids or evidenced material changes. Every clean tender still saves to the Dataset and charges each run, including unchanged bids. Omit for the ordinary scrape. CPPP-only watchlists are unsupported.",
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 50,
+            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,49}$",
+            "editor": "textfield"
         }
     }
 }
