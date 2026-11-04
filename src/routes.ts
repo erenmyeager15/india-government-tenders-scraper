@@ -82,12 +82,17 @@ export function normalizeInput(input: ActorInput | null): NormalizedInput {
     if (dateFrom && dateTo && Date.parse(dateFrom) > Date.parse(dateTo)) {
         throw new Error('dateFrom cannot be after dateTo.');
     }
-    if (input?.includePdfDetails !== undefined && typeof input.includePdfDetails !== 'boolean') {
+    const rawPdf: unknown = input?.includePdfDetails;
+    const pdfFlag = rawPdf === 'true' ? true : rawPdf === 'false' ? false : rawPdf;
+    if (pdfFlag !== undefined && pdfFlag !== null && typeof pdfFlag !== 'boolean') {
         throw new Error('includePdfDetails must be true or false.');
     }
-    const includePdfDetails = input?.includePdfDetails !== false;
+    let includePdfDetails = pdfFlag !== false;
     if (!includePdfDetails && (watchlistName || cleanString(input?.department) || cleanString(input?.state) || dateFrom || dateTo || minValue !== null || maxValue !== null)) {
-        throw new Error('PDF details must be enabled for saved watchlists and detail filters. Remove those options or use includePdfDetails: true.');
+        // Failing the whole run here gave the user nothing. These options need
+        // PDF fields, so read the PDFs instead and say so.
+        log.warning('Saved watchlists and department/state/date/value filters need bid PDF details; enabling includePdfDetails for this run.');
+        includePdfDetails = true;
     }
 
     return {
@@ -931,9 +936,20 @@ function normalizeMaxResults(value: unknown): number {
 function normalizedDate(value: unknown, fieldName: string): string | null {
     const cleaned = cleanString(value);
     if (!cleaned) return null;
+    // Indian users commonly type DD-MM-YYYY or DD/MM/YYYY. JavaScript rejects
+    // 15-11-2026 and misreads 04/11/2026 as 11 April, so convert explicitly.
+    const dayFirst = cleaned.match(/^(\d{1,2})[-/.](\d{1,2})[-/.](\d{4})$/);
+    if (dayFirst) {
+        const [, day, month, year] = dayFirst.map(Number);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        if (date.getUTCFullYear() !== year || date.getUTCMonth() !== month - 1 || date.getUTCDate() !== day) {
+            throw new Error(`${fieldName} must be a valid date (YYYY-MM-DD or DD-MM-YYYY).`);
+        }
+        return date.toISOString().slice(0, 10);
+    }
     const timestamp = Date.parse(cleaned);
     if (Number.isNaN(timestamp)) {
-        throw new Error(`${fieldName} must be a valid date.`);
+        throw new Error(`${fieldName} must be a valid date (YYYY-MM-DD or DD-MM-YYYY).`);
     }
     return cleaned;
 }

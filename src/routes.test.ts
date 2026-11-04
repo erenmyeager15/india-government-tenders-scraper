@@ -37,6 +37,15 @@ test('falls back from invalid enum and numeric API values', () => {
     assert.equal(input.minValue, null);
 });
 
+test('accepts Indian day-first dates and string booleans', () => {
+    assert.equal(normalizeInput({ dateFrom: '15-11-2026' }).dateFrom, '2026-11-15');
+    assert.equal(normalizeInput({ dateFrom: '04/11/2026' }).dateFrom, '2026-11-04');
+    assert.equal(normalizeInput({ dateTo: '1.12.2026' }).dateTo, '2026-12-01');
+    assert.equal(normalizeInput({ dateFrom: '2026-11-15' }).dateFrom, '2026-11-15');
+    assert.throws(() => normalizeInput({ dateFrom: '31-02-2026' }), /valid date/);
+    assert.equal(normalizeInput({ includePdfDetails: 'false' as never }).includePdfDetails, false);
+});
+
 test('rejects impossible value and date ranges before requests', () => {
     assert.throws(() => normalizeInput({ minValue: 100, maxValue: 10 }), /minValue cannot be greater than maxValue/);
     assert.throws(() => normalizeInput({ dateFrom: '2026-07-10', dateTo: '2026-07-01' }), /dateFrom cannot be after dateTo/);

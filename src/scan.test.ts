@@ -163,9 +163,9 @@ test('listing-only collection is opt-in and incompatible detail options fail bef
     assert.equal(normalizeInput({ includePdfDetails: false }).includePdfDetails, false);
     assert.equal(normalizeInput({ includePdfDetails: false, state: '  ', department: '  ' }).includePdfDetails, false);
     for (const option of [{ watchlistName: 'watch' }, { state: 'Karnataka' }, { department: 'Education' }, { dateFrom: '2026-10-01' }, { dateTo: '2026-10-31' }, { minValue: 0 }, { maxValue: 10 }]) {
-        assert.throws(() => normalizeInput({ ...option, includePdfDetails: false }), /PDF details must be enabled/);
+        assert.equal(normalizeInput({ ...option, includePdfDetails: false }).includePdfDetails, true);
     }
-    assert.throws(() => normalizeInput({ includePdfDetails: 'false' as never }), /must be true or false/);
+    assert.throws(() => normalizeInput({ includePdfDetails: 'no' as never }), /must be true or false/);
 });
 
 for (const limit of [1, 40, 50]) test(`${limit} unique listing-only tenders use no PDF work and respect the result limit`, async () => {
