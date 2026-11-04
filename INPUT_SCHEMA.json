@@ -49,13 +49,13 @@
         },
         "dateFrom": {
             "title": "Date From",
-            "description": "Optional published-date filter applied after GeM detail PDF enrichment.",
+            "description": "Optional published-date filter applied after GeM detail PDF enrichment. Use YYYY-MM-DD or DD-MM-YYYY.",
             "type": "string",
             "editor": "textfield"
         },
         "dateTo": {
             "title": "Date To",
-            "description": "Optional published-date filter applied after GeM detail PDF enrichment.",
+            "description": "Optional published-date filter applied after GeM detail PDF enrichment. Use YYYY-MM-DD or DD-MM-YYYY.",
             "type": "string",
             "editor": "textfield"
         },
@@ -78,7 +78,7 @@
         },
         "includePdfDetails": {
             "title": "Include Bid PDF Details",
-            "description": "Enabled by default to preserve the existing enriched output. Turn off for faster bulk listing collection: PDF-only fields remain unknown, and detail filters/saved watchlists cannot be used. PDF downloads have a 35-second/8 MiB limit, bounded further by the selected run deadline. Evaluated reverse auctions may expose an unsupported HTML schedule index; unavailable or failed enrichment preserves the listing and marks coverage incomplete.",
+            "description": "Enabled by default to preserve the existing enriched output. Turn off for faster bulk listing collection: PDF-only fields remain unknown. Detail filters and saved watchlists need PDFs, so using them turns PDF details back on. PDF downloads have a 35-second/8 MiB limit, bounded further by the selected run deadline. Evaluated reverse auctions may expose an unsupported HTML schedule index; unavailable or failed enrichment preserves the listing and marks coverage incomplete.",
             "type": "boolean",
             "default": true,
             "editor": "checkbox"
