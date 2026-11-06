@@ -57,8 +57,16 @@ export function createGemScanDiagnostics(): GemScanDiagnostics {
 export function normalizeInput(input: ActorInput | null): NormalizedInput {
     const requestedKeywords = Array.isArray(input?.keywords) ? input.keywords : DEFAULT_KEYWORDS;
     const allKeywords = [...new Set(requestedKeywords.map((keyword) => cleanString(keyword)).filter((keyword): keyword is string => Boolean(keyword)))];
-    const keywords = allKeywords.slice(0, MAX_KEYWORDS_PER_RUN);
-    if (allKeywords.length > MAX_KEYWORDS_PER_RUN) {
+    const unsearchable = allKeywords.filter((keyword) => !hasGemSearchableText(keyword));
+    if (unsearchable.length > 0) {
+        log.warning(`GeM search accepts English keywords only. Skipping ${unsearchable.map((k) => `"${k}"`).join(', ')}; use an English term such as "broom" or "laptop".`);
+        if (unsearchable.length === allKeywords.length) {
+            throw new Error(`GeM search accepts English keywords only. ${unsearchable.map((k) => `"${k}"`).join(', ')} has no English letters or digits; try a term such as "broom" or "laptop".`);
+        }
+    }
+    const searchableKeywords = allKeywords.filter(hasGemSearchableText);
+    const keywords = searchableKeywords.slice(0, MAX_KEYWORDS_PER_RUN);
+    if (searchableKeywords.length > MAX_KEYWORDS_PER_RUN) {
         log.warning(
             `Input contained ${allKeywords.length} keywords. Processing first ${MAX_KEYWORDS_PER_RUN} to keep public runs cost-safe.`,
         );
@@ -449,11 +457,30 @@ async function closeGemSession(session: GemSession): Promise<void> {
     }
 }
 
+/** GeM's search API rejects many punctuation marks with HTTP 404/500 (checked
+ * live 6 Nov 2026: "M&S", "a/c", "printer's", "50%", "x-ray", "pen, pencil",
+ * "office: chairs", "café" and Devanagari all fail; the same words with plain
+ * spaces succeed). Send only Latin letters, digits, spaces and dots. The saved
+ * records keep the user's original keyword. */
+export function gemSearchText(keyword: string): string {
+    const text = keyword
+        .normalize('NFKD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/&/g, ' and ')
+        .replace(/[^A-Za-z0-9. ]+/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+    return text || keyword;
+}
+
+function hasGemSearchableText(keyword: string): boolean {
+    return /[A-Za-z0-9]/.test(keyword.normalize('NFKD'));
+}
+
 async function fetchGemPage(session: GemSession, status: TenderStatus, keyword: string, page: number): Promise<GemSearchResponse> {
     const payload = {
         page,
         param: {
-            searchBid: keyword,
+            searchBid: gemSearchText(keyword),
             searchType: 'fullText',
         },
         filter: buildGemFilter(status),

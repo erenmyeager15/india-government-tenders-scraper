@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { extractCsrfToken, isChargeableTender, mapGemDoc, normalizeInput } from './routes.js';
+import { extractCsrfToken, gemSearchText, isChargeableTender, mapGemDoc, normalizeInput } from './routes.js';
 import type { TenderRecord } from './types.js';
 
 test('normalizes to the low-cost GeM default', () => {
@@ -35,6 +35,19 @@ test('falls back from invalid enum and numeric API values', () => {
     assert.equal(input.status, 'active');
     assert.equal(input.maxResults, 1);
     assert.equal(input.minValue, null);
+});
+
+test('GeM search text drops punctuation that makes the API return 404/500', () => {
+    assert.equal(gemSearchText('M&S'), 'M and S');
+    assert.equal(gemSearchText('a/c'), 'a c');
+    assert.equal(gemSearchText("printer's"), 'printer s');
+    assert.equal(gemSearchText('x-ray'), 'x ray');
+    assert.equal(gemSearchText('pen, pencil'), 'pen pencil');
+    assert.equal(gemSearchText('office: chairs'), 'office chairs');
+    assert.equal(gemSearchText('café'), 'cafe');
+    assert.equal(gemSearchText('3.5 inch'), '3.5 inch');
+    assert.deepEqual(normalizeInput({ keywords: ['झाड़ू', 'broom'] }).keywords, ['broom']);
+    assert.throws(() => normalizeInput({ keywords: ['झाड़ू'] }), /English keywords only/);
 });
 
 test('accepts Indian day-first dates and string booleans', () => {
